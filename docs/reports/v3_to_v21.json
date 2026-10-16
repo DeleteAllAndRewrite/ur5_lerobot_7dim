@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "frames": 60,
+  "episodes": 2,
+  "numeric_features_exact": true,
+  "tasks_and_timestamps_exact": true,
+  "rgb_mean_absolute_error_0_255": {
+    "observation.images.agentview_1": 1.4978732638888888,
+    "observation.images.agentview_2": 1.4637442129629632,
+    "observation.images.eye_in_hand": 1.4648365162037038
+  },
+  "video_reencoded": true
+}

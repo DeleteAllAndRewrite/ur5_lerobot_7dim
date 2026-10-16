@@ -1,0 +1,246 @@
+# UR5 · SpaceMouse · 三视角 RGB · LeRobot v3
+
+配置驱动的单 UR5 / 单 SpaceMouse / 三路 RealSense RGB 示教采集（2 个全局视角、1 个 eye-in-hand）。
+
+**数据维度（当前版本）：**
+
+- `observation.state: float32[8]`：绝对 EEF TCP `[x,y,z,rx,ry,rz]` (6D) + 夹爪左右手指**绝对关节位置** `[left_finger_qpos_m,right_finger_qpos_m]` (2D)。前三维单位米、姿态为旋转向量（轴角）rad、夹爪位置单位米；不是关节角或 8D 增量。
+- `action: float32[7]`：`[dx,dy,dz,drx,dry,drz,grasp]`；6D EEF 相对**控制目标增量**，以及 1D 二值夹爪命令 (0=open, 1=closed)。与上一时刻真实位姿之差可能不同。
+- `observation.joint_positions: float32[6]`：单独保存 UR5 六个关节角。
+
+原压缩包自带的 `datasets/mock_three_rgb/` 是**历史 6D state / 6D action** 示例，已保留以免丢失数据；新模拟配置使用 `datasets/mock_three_rgb_8d/`，避免把旧样本当作本次 8D/7D 数据。
+
+**实机反馈要求：** 现有项目未附带具体型号夹爪的测量/执行驱动。为避免误将夹爪 **命令**当作**实际位置**，真实录制在没有配置 `gripper.feedback_plugin` 时将拒绝启动；本项目提供适配接口，需接入真实硬件的两指反馈。模拟模式提供明确标注的合成左右指关节位置，不可当成真实测量。动作中的 `grasp` 仍只作为记录的命令，不会自动驱动物理夹爪。参见 `docs/GRIPPER_FEEDBACK.md`。
+
+LeRobot v0.4.4 官方 writer 负责生成 v3.0；LeRobot v0.3.3 隔离环境负责 v2.1↔v3.0 格式转换。当前仅采 RGB、非 RGB-D；未做实物硬件验证。
+
+## 1. 架构与目录
+
+```mermaid
+flowchart TD
+    C["YAML 配置与校验"] --> T["SpaceMouse Teleoperator"]
+    C --> R["UR5 Robot"]
+    C --> V["三路 RGB 采集线程"]
+    T --> L["30 Hz 采集主循环"]
+    V --> L
+    R --> L
+    L --> P["独立 RTDE 伺服进程"]
+    P --> U["UR5 servoL"]
+    U --> R
+    L --> D["官方 LeRobotDataset v3"]
+    D --> F["Parquet、MP4、元数据"]
+```
+
+| 路径 | 职责 |
+|---|---|
+| `lerobot/` | 官方 LeRobot v0.4.4 源码快照；包含完整 src 与安装文件，不含媒体、示例和上游测试 |
+| `compat/lerobot_v21/` | 官方 v0.3.3 源码快照，供隔离转换环境使用 |
+| `configs/ur5_three_rgb.yaml` | 实机配置，默认不启用运动 |
+| `configs/mock.yaml` | 不依赖实物的三视角演示配置 |
+| `src/ur5_capture/lerobot_bridge.py` | 继承官方 `Robot` / `Teleoperator` 的适配类 |
+| `src/ur5_capture/robot.py` | UR RTDE 独立进程、插值、限位和超时停止 |
+| `src/ur5_capture/teleop.py` | SpaceMouse 原始 HID 输入、轴映射、deadman |
+| `src/ur5_capture/gripper.py` | 8D 状态的两指反馈接口；模拟模式和硬件插件模式 |
+| `src/ur5_capture/cameras.py` | 三台 RealSense 并行 RGB 读取、时间选择、重复帧检测 |
+| `src/ur5_capture/dataset.py` | 特征定义与官方 v3 写入器 |
+| `src/ur5_capture/record.py` | episode 开始、结束、保存、丢弃、异常清理 |
+| `src/ur5_capture/convert.py` | 两个 Python 环境之间的双向转换调度 |
+| `src/ur5_capture/conversion_worker.py` | 官方读写器转换及逐帧校验 |
+| `tools/inspect_dataset.py` | 解码全部视频并检查动作定义和时间连续性 |
+| `docs/ARCHITECTURE.md` | 数据语义、时序和扩展边界 |
+| `docs/VALIDATION.md` | 已执行验证、结果与实机待验项 |
+| `docs/GRIPPER_FEEDBACK.md` | 真实夹爪关节位置采集接口和示例 |
+
+**LeRobot 软件版本与数据版本不同。** 本项目固定 LeRobot **v0.4.4 → 数据 v3.0**，兼容环境固定 LeRobot **v0.3.3 → 数据 v2.1**。源码 commit 见 `UPSTREAM.json`。扩展代码位于独立包中，没有修改官方源码。
+
+采集器调用官方基类的扩展接口以保留时间戳及控制命令确认；相机由 `CameraRig` 管理。当前入口为 `ur5-capture`，不是直接调用上游 `lerobot-record`。配置类型会在导入适配模块后注册，但没有修改上游 CLI 的设备发现和 processor 工厂。
+
+## 2. 手动 Conda 环境安装（不使用一键安装脚本）
+
+在 **项目根目录** 下逐行执行。推荐 Python 3.11（包括 Apple Silicon 开发环境），使用 conda-forge 通道。请避免 `conda create -n xxx python= 3.12` 中 `=` 后面的空格。建议 Linux x86_64 + RealSense SDK + RTDE 用于实机；macOS 可用于离线开发，但 macOS 的 RealSense SDK/USB 兼容性不在已验范围内。首次下载依赖需要联网。
+
+### 2.1 v3 采集环境
+
+```bash
+# 1. 创建并进入 Conda 环境（不是 venv）
+conda create -n ur5-lerobot-v3 -c conda-forge python=3.11 -y
+conda activate ur5-lerobot-v3
+
+# 2. 安装系统级视频编解码工具和固定的项目依赖
+conda install -c conda-forge ffmpeg -y
+python -m pip install --upgrade pip
+python -m pip install -r requirements/v3.txt
+
+# 3. 使用本项目内的官方 LeRobot 源码，不自动拉取新版 LeRobot
+python -m pip install -e ./lerobot --no-deps
+python -m pip install -e '.[test]'
+
+# 4. 核验解释器、版本与本项目配置
+python -c 'import sys; print(sys.executable)'
+python src/ur5_capture/conversion_worker.py probe --version v3.0
+ur5-capture validate --config configs/mock.yaml
+python -m pytest tests -q
+```
+
+Linux CPU-only 开发机如需避免 pip 默认获取 GPU 版 PyTorch，可以**在安装 `requirements/v3.txt` 之前**先执行：
+
+```bash
+python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
+```
+
+**模拟采集和检查（已存在同名输出目录时会安全拒绝覆盖）：**
+
+```bash
+conda activate ur5-lerobot-v3
+ur5-capture record --config configs/mock.yaml --unattended
+python tools/inspect_dataset.py --root datasets/mock_three_rgb_8d
+```
+
+该 Conda 环境为采集和转换提供所需依赖，**不是**全部上游算法训练环境；上游全部训练、仿真等可选 extras 需要按上游文档单独安装。LeRobot 的 `--no-deps` 安装是为了避免覆盖本项目固定测试的依赖版本。
+
+### 2.2 v2.1 数据转换环境
+
+```bash
+# 与 v3 环境隔离，避免两个版本的 datasets/LeRobot 互相覆盖
+conda create -n ur5-lerobot-v21 -c conda-forge python=3.11 -y
+conda activate ur5-lerobot-v21
+conda install -c conda-forge ffmpeg -y
+python -m pip install --upgrade pip
+python -m pip install -r requirements/v21.txt
+python -m pip install -e ./compat/lerobot_v21 --no-deps
+python src/ur5_capture/conversion_worker.py probe --version v2.1
+
+# 返回 v3 环境执行采集或转换调度
+conda activate ur5-lerobot-v3
+```
+
+如需同时存在多个环境，请使用 `conda run -n ... python -c 'import sys; print(sys.executable)'` 查询两个解释器的**绝对路径**，再将其传给转换命令；不要依赖当前激活的 Python 误读另一个版本。
+
+## 3. 实机配置与采集
+
+安装硬件 Python 依赖：
+
+```bash
+conda activate ur5-lerobot-v3
+python -m pip install -e '.[hardware]'
+ur5-capture devices
+```
+
+RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySpaceMouse 2.0 的原始 HID 接口，需要 hidapi 系统库及 hidraw 访问权限。依照设备官方安装说明配置，避免其他 SpaceMouse 驱动独占设备。
+
+编辑 `configs/ur5_three_rgb.yaml`：
+
+| 配置 | 必须确认的内容 |
+|---|---|
+| `robot.ip` | UR5 控制器地址；主机与机器人网络可达 |
+| `robot.controller` | 普通 UR5 设 `cb3`，UR5e 才设 `e_series` |
+| `robot.control_hz` | 默认 125；CB3 配置禁止超过 125 |
+| `robot.tcp_offset` | 实测工具相对法兰偏移，单位 m、旋转向量 rad |
+| `robot.tcp_configured` | 完成 TCP 配置后改为 true |
+| `robot.workspace_min/max` | 实际允许的 TCP 工作区域；示例值不是你的安全边界 |
+| `robot.workspace_configured` | 核实工作区后改为 true |
+| `cameras[].serial` | 三台相机各自唯一序列号，以字符串填写 |
+| `teleop.translation_axes/rotation_axes` | 确认实际 SpaceMouse 各轴方向 |
+| `teleop.*_signs` | 对需要反向的轴填 -1 |
+| `teleop.frame` | `base` 或 `tool`；最终保存的动作统一为 base 坐标 |
+| `gripper.initial_grasp` | 初始夹爪指令状态，0=张开，1=闭合（不会实际执行夹爪运动） |
+| `gripper.toggle_button` | 可选独立 SpaceMouse 按键索引；没有空闲键就填 `null`，在录制终端按 `g` 切换 |
+| `gripper.feedback_source` | 实机固定 `plugin`，模拟模式固定 `mock` |
+| `gripper.feedback_plugin` | 实机必须设成 `module:Class`，`read_qpos()` 返回左右手指**真实绝对关节位置**；未配置则拒绝启动 |
+| `gripper.feedback_kwargs` | 传给反馈类构造器的参数，如端口、地址等 |
+| `robot.motion_enabled` | 完成以上配置后设 true |
+| `dataset.root/task/episodes/episode_seconds` | 输出目录、任务描述及采集长度 |
+
+机械臂应已完成启动、制动器释放、工具负载设置，处于允许远程 RTDE 控制的状态；本项目不自动开机、解锁保护停机或执行回零。不同 UR5 控制器/PolyScope 版本的远程模式需按设备说明设置。
+
+```bash
+ur5-capture validate --config configs/ur5_three_rgb.yaml
+ur5-capture record --config configs/ur5_three_rgb.yaml
+```
+
+交互方式：
+
+1. Enter 开始 episode。
+2. 按住 SpaceMouse `deadman_button` 才允许运动，松开后停止伺服运动。
+3. 采集中按 `g` 切换 `grasp` 指令状态（0/1，保持到下次切换）；`s` 提前结束；`d` 丢弃；`q` 丢弃当前 episode 并退出。
+4. 结束后 Enter/`s` 保存，`d` 重录，`q` 丢弃并退出。视频编码前先确认停止机器人。
+5. SpaceMouse `stop_button` 或 Ctrl-C 中断采集；当前未完成 episode 丢弃，已经完成的保留。
+
+普通双键 SpaceMouse 默认已把两个按键分别用作 deadman 与停止，因此 `gripper.toggle_button: null`，通过**采集终端 `g` 键**控制夹爪目标状态。若 SpaceMouse 有额外按键，可在 config 中指定第三个未占用键，采集器在按下沿切换 `grasp`。这些输入仅产生记录的命令标签；若要物理夹爪随命令开合，仍需另行接入并测试该型号的执行驱动。**8D 状态必须从独立测量接口获得，不能由动作推断。**
+
+开始实机联调时先在空旷区域用低速核对单轴方向、TCP、deadman、失联与断帧停止行为。软件停止和 TCP 盒状限位不能代替物理急停，也不做碰撞规划或完整机械臂几何限位检查。Python 伺服进程不提供硬实时保证。
+
+## 4. 数据定义
+
+| 字段 | 维度/格式 | 含义 |
+|---|---|---|
+| `observation.images.agentview_1` | H×W×3，RGB uint8 输入 | 全局视角 1，存 MP4 |
+| `observation.images.agentview_2` | H×W×3，RGB uint8 输入 | 全局视角 2，存 MP4 |
+| `observation.images.eye_in_hand` | H×W×3，RGB uint8 输入 | 手眼相机，存 MP4 |
+| `observation.state` | **float32[8]** | 绝对 `[x,y,z,rx,ry,rz,left_finger_qpos_m,right_finger_qpos_m]`；前 6D 是实测 TCP，后 2D 为真实插件反馈或明确标注的 mock 模拟反馈 |
+| `action` | **float32[7]** | `[dx,dy,dz,drx,dry,drz,grasp]`；前六维为本周期目标 TCP 增量，第七维为二值夹爪指令状态（0 张开，1 闭合） |
+| `observation.joint_positions` | float32[6] | 六关节位置，rad，作为附加观测 |
+| `complementary_info.target_pose` | float32[6] | 裁剪后提交且被控制进程接收的 TCP 目标 |
+| `complementary_info.camera_frame_numbers` | int64[3] | 相机硬件帧号，顺序与 config 一致 |
+| `complementary_info.camera_host_times` | float64[3] | 三路帧到达主机的 monotonic 秒 |
+| `complementary_info.camera_device_times_ms` | float64[3] | 各自设备时间，不假定具有共同起点 |
+| `complementary_info.robot_timestamp` | float64[1] | 控制器时间，秒 |
+| `complementary_info.gripper_host_time` | float64[1] | 夹爪位置读取完成的主机 monotonic 秒 |
+| `complementary_info.robot_host_time` | float64[1] | 控制进程读取状态时的主机时间 |
+| `complementary_info.host_time` | float64[1] | 主循环组装记录时的主机时间 |
+| `complementary_info.command_accepted_time` | float64[1] | 控制进程接受目标命令时的主机时间 |
+| `complementary_info.deadman` | int64[1] | 本帧运动使能状态 |
+
+位置单位 m；姿态是旋转向量（轴角），**不是欧拉角**。旋转增量满足 `R_target = Exp(dr) @ R_observed`。输入设为 tool 坐标时先正确进行旋转复合，再把最终动作转换为 base 坐标保存。
+
+夹爪指令使用锁存状态，不是夹爪增量，也不是实测开度。`observation.state[6:8]` 则是左右指的**绝对位置**（单位 m），从单独的夹爪反馈对象读取，**不是** `action[6]` 的复制或变换；mock 使用模拟反馈。`complementary_info.deadman` 单独保存运动使能；它不属于 7 维动作。LeRobot Robot/Teleoperator 直连控制接口为安全起见另有一个 `enabled` 字段，但数据集中的 `action` 只有七维。
+
+每行表达：先获取 `observation_t`（含 EEF 与夹爪反馈），再提交 `action_t`，目标在一个 `1/fps` 周期内插值逼近。`action` 是目标命令增量，**不等于实测 `state[t+1] - state[t]`**，也不是机器人内部实际已执行位移。`target_pose` 是目标端点，不是 125 Hz 的每个内部插值设定点。
+
+`timestamp`、`frame_index`、`episode_index`、`index`、`task_index` 由官方写入器生成。标准 `timestamp=frame_index/fps`，实测墙钟偏差保存在附加字段。训练加载器默认将图像转换为 CHW、float32、[0,1]。部分数值特征在官方默认 tensor transform 中也可能转成 float32；需要 float64 时间精度时应读取 Parquet 原值，本项目转换工具已这样处理。
+
+三个独立 RGB 传感器使用主机到达时间做软件选择；每帧必须比上一条记录更新，且通过 freshness 与 skew 阈值。**这不是三相机曝光级硬件同步**，设备时间戳不直接跨相机相减。运动速度高、需要精确几何重建时，应另行建立设备时钟映射、曝光同步和手眼/外参标定。本项目保存相机内参，不自动完成外参标定。
+
+## 5. v2.1 与 v3.0 双向转换
+
+先按 §2 **手动创建两个 Conda 环境**，然后在项目根目录执行：
+
+```bash
+# 查询两个 Conda 环境的实际 Python 路径
+V3_PY="$(conda run -n ur5-lerobot-v3 python -c 'import sys; print(sys.executable)')"
+V21_PY="$(conda run -n ur5-lerobot-v21 python -c 'import sys; print(sys.executable)')"
+conda activate ur5-lerobot-v3
+
+# v3 -> v2.1
+ur5-convert \
+  --source datasets/mock_three_rgb_8d \
+  --destination datasets/mock_v21 \
+  --python-v21 "$V21_PY" \
+  --python-v3 "$V3_PY"
+
+# v2.1 -> v3
+ur5-convert \
+  --source datasets/mock_v21 \
+  --destination datasets/mock_v3_roundtrip \
+  --python-v21 "$V21_PY" \
+  --python-v3 "$V3_PY"
+```
+
+两个版本都会保留 `observation.state: 8D` 和 `action: 7D` 的特征形状；转换器保留数值字段但会重新编码视频。
+
+工具根据源 `meta/info.json` 自动确定方向。官方源读取器解析 episode / 视频偏移，导出临时无损 NPZ 桥接数据；另一环境的官方写入器重建数据和统计量。最后逐帧核验数值、任务、时间戳及图像尺寸，成功后才将临时输出改名为正式目录。源目录从不修改，不覆盖既有目标目录，不上传到 Hub。
+
+转换保留每帧数值字段、episode 顺序、任务文本和时间戳；任务索引可能重新编号。MP4 会重新编码：**不是像素无损或文件字节无损转换**。报告 `meta/conversion_validation.json` 给出每个视角的解码后平均绝对像素误差。v2.1 使用该版本官方默认 AV1 编码；v3 使用 H.264。若目标是大规模、保持视频压缩码流的 v2.1→v3 迁移，可另外使用根目录源码里的官方单向迁移脚本。
+
+转换范围是本项目数据，以及 HWC 三通道 RGB image/video + 固定形状数值特征的连续 episode 数据集。复杂字符串特征、subtask 元数据、外部自定义附件不在通用转换范围内；unsupported schema 会报错。会复制本项目 `capture_config.json` 和 `environment.txt`，不会承诺保留其他项目的自定义元数据。
+
+临时解码 RGB 数据可能远大于 MP4；可用 `--work-parent /path/with/free/space` 指定临时目录。转换失败留下带 `CONVERSION_FAILED.txt` 的临时输出用于检查，不会伪装成完成的数据集。
+
+## 6. 官方参考
+
+- [LeRobotDataset v3 文档](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
+- [LeRobot v0.4.4 源码](https://github.com/huggingface/lerobot/tree/8fff0fde7c79f23a93d845d1a50e985de01f8b8a)
+- [LeRobot v0.3.3 源码](https://github.com/huggingface/lerobot/tree/b883328e6c95681ca90a18b102e4ae5e1f91e2bf)
+- [ur_rtde servoL 示例](https://sdurobotics.gitlab.io/ur_rtde/pages/examples/high_frequency_servoing/servol_example.html)
+- [PySpaceMouse](https://github.com/JakubAndrysek/PySpaceMouse)
+- [RealSense SDK](https://github.com/realsenseai/librealsense)

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+.venv*/
+.pytest_cache/
+.ruff_cache/
+datasets/
+*.log
+.workbuddy-ai/

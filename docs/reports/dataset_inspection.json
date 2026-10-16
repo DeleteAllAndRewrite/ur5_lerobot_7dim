@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "format": "v3.0",
+  "frames": 60,
+  "episodes": 2,
+  "cameras": [
+    "observation.images.agentview_1",
+    "observation.images.agentview_2",
+    "observation.images.eye_in_hand"
+  ],
+  "nominal_fps": 30,
+  "actual_frame_interval_p50_s": 0.03205067099997905,
+  "actual_frame_interval_max_s": 0.04034474699983548
+}

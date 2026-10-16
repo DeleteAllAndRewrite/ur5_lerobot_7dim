@@ -1,0 +1,74 @@
+# Paths are relative to this project's root, not the terminal's working directory.
+mode: real
+dataset:
+  repo_id: local/ur5_three_rgb
+  root: datasets/ur5_three_rgb
+  fps: 30
+  task: Pick up the object and place it in the target area
+  episodes: 10
+  episode_seconds: 30.0
+  image_writer_threads: 6
+  vcodec: h264
+robot:
+  ip: 192.168.1.10
+  controller: cb3             # UR5 CB3: 125 Hz; UR5e: e_series up to 500 Hz
+  control_hz: 125
+  motion_enabled: false       # Enable only after setting the TCP and workspace below
+  tcp_offset: [0, 0, 0, 0, 0, 0]  # flange -> tool TCP; m, axis-angle rad
+  tcp_configured: false
+  lookahead_time: 0.1
+  gain: 300
+  max_translation_speed: 0.05 # vector norm, m/s
+  max_rotation_speed: 0.3     # vector norm, rad/s
+  max_tracking_translation: 0.03
+  max_tracking_rotation: 0.2
+  command_timeout_s: 0.15
+  watchdog_hz: 10.0
+  workspace_min: [-0.60, -0.60, 0.10]
+  workspace_max: [0.60, 0.60, 0.80]
+  workspace_configured: false
+  mock_initial_pose: [0.30, 0.0, 0.30, 0.0, 3.141592653589793, 0.0]
+teleop:
+  device_index: 0
+  deadzone: 0.12
+  translation_axes: [0, 1, 2]  # device x,y,z,roll,pitch,yaw = indices 0..5
+  rotation_axes: [3, 4, 5]
+  translation_signs: [1, 1, 1]
+  rotation_signs: [1, 1, 1]
+  frame: base                # base or tool; saved action always expressed in base
+  deadman_button: 0          # hold to move; release stops
+  stop_button: 1             # aborts recording, not a certified emergency stop
+  stale_timeout_s: 0.15
+gripper:
+  initial_grasp: 0           # 0=open, 1=closed; commanded action only, NOT measured qpos
+  toggle_button: null       # spacemouse切换grasp指令按键
+  feedback_source: plugin   # REQUIRED for real 8D observation.state
+  feedback_plugin: null     # set to "your_driver_module:YourFeedbackClass" before recording
+  feedback_kwargs: {}      # driver-specific connection parameters
+  # Driver read_qpos() must return two REAL measured signed finger-joint positions in meters.
+  # No physical gripper actuator is provided by this project.
+cameras:
+  - name: agentview_1
+    role: global
+    serial: REPLACE_CAMERA_SERIAL_1. # 相机序列号
+    width: 640
+    height: 480
+    fps: 30
+  - name: agentview_2
+    role: global
+    serial: REPLACE_CAMERA_SERIAL_2
+    width: 640
+    height: 480
+    fps: 30
+  - name: eye_in_hand
+    role: eye_in_hand
+    serial: REPLACE_CAMERA_SERIAL_3
+    width: 640
+    height: 480
+    fps: 30
+synchronization:
+  max_camera_skew_s: 0.040
+  max_camera_age_s: 0.100
+  max_robot_age_s: 0.050
+  max_loop_lateness_s: 0.050
+  startup_timeout_s: 10.0

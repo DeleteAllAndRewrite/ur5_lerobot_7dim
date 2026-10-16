@@ -1,0 +1,15 @@
+{
+  "lerobot": "0.4.4",
+  "torch": "2.7.1+cpu",
+  "torchvision": "0.22.1+cpu",
+  "datasets": "4.8.5",
+  "numpy": "2.2.6",
+  "scipy": "1.17.0",
+  "pandas": "2.2.3",
+  "pyarrow": "26.0.0",
+  "av": "15.1.0",
+  "pydantic": "2.13.5",
+  "pyspacemouse": "2.0.0",
+  "ur-rtde": "1.6.5",
+  "pyrealsense2": "2.56.5.9235"
+}

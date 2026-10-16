@@ -1,0 +1,17 @@
+{
+  "v3": {
+    "tag": "v0.4.4",
+    "commit": "8fff0fde7c79f23a93d845d1a50e985de01f8b8a",
+    "dataset_version": "v3.0",
+    "directory": "lerobot"
+  },
+  "v21": {
+    "tag": "v0.3.3",
+    "commit": "b883328e6c95681ca90a18b102e4ae5e1f91e2bf",
+    "dataset_version": "v2.1",
+    "directory": "compat/lerobot_v21"
+  },
+  "upstream": "https://github.com/huggingface/lerobot",
+  "snapshot": "Full src plus install metadata; no .git, media, docs, upstream tests or examples",
+  "upstream_modified": false
+}

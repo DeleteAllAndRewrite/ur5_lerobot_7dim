@@ -1,0 +1,103 @@
+mode: mock
+dataset:
+  repo_id: local/ur5_three_rgb
+  root: datasets/mock_three_rgb_8d
+  fps: 30
+  task: Mock three-view capture
+  episodes: 2
+  episode_seconds: 1.0
+  image_writer_threads: 6
+  vcodec: h264
+robot:
+  ip: 192.168.1.10
+  controller: cb3
+  control_hz: 125
+  motion_enabled: false
+  tcp_offset:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  tcp_configured: false
+  lookahead_time: 0.1
+  gain: 300
+  max_translation_speed: 0.05
+  max_rotation_speed: 0.3
+  max_tracking_translation: 0.03
+  max_tracking_rotation: 0.2
+  command_timeout_s: 0.15
+  watchdog_hz: 10.0
+  workspace_min:
+  - -0.6
+  - -0.6
+  - 0.1
+  workspace_max:
+  - 0.6
+  - 0.6
+  - 0.8
+  workspace_configured: false
+  mock_initial_pose:
+  - 0.3
+  - 0.0
+  - 0.3
+  - 0.0
+  - 3.141592653589793
+  - 0.0
+teleop:
+  device_index: 0
+  deadzone: 0.12
+  translation_axes:
+  - 0
+  - 1
+  - 2
+  rotation_axes:
+  - 3
+  - 4
+  - 5
+  translation_signs:
+  - 1
+  - 1
+  - 1
+  rotation_signs:
+  - 1
+  - 1
+  - 1
+  frame: base
+  deadman_button: 0
+  stop_button: 1
+  stale_timeout_s: 0.15
+gripper:
+  initial_grasp: 0  # 0=open, 1=closed (command only)
+  toggle_button: null  # mock toggles every 10 samples
+  feedback_source: mock  # 8D state[6:8] is SYNTHETIC, never real feedback
+  mock_open_width_m: 0.08  # [left,right] = [+width/2,-width/2] in mock
+cameras:
+- name: agentview_1
+  role: global
+  serial: mock_0
+  width: 64
+  height: 48
+  fps: 30
+- name: agentview_2
+  role: global
+  serial: mock_1
+  width: 64
+  height: 48
+  fps: 30
+- name: eye_in_hand
+  role: eye_in_hand
+  serial: mock_2
+  width: 64
+  height: 48
+  fps: 30
+synchronization:
+  max_camera_skew_s: 0.04
+  max_camera_age_s: 0.1
+  max_robot_age_s: 0.05
+  # Mock mode is a data-plumbing smoke test, not real-time control: keep a generous
+  # lateness budget so shared/contended hosts (e.g. AutoDL containers) don't trip the
+  # "Recorder missed its timing deadline" guard on a single slow frame.
+  max_loop_lateness_s: 1.0
+  startup_timeout_s: 10.0
