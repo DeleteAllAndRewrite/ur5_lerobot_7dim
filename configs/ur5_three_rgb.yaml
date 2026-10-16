@@ -10,23 +10,30 @@ dataset:
   image_writer_threads: 6
   vcodec: h264
 robot:
+  # 机器人连接
   ip: 192.168.1.10
   controller: cb3             # UR5 CB3: 125 Hz; UR5e: e_series up to 500 Hz
+  # 控制频率
   control_hz: 125
-  motion_enabled: false       # Enable only after setting the TCP and workspace below
-  tcp_offset: [0, 0, 0, 0, 0, 0]  # flange -> tool TCP; m, axis-angle rad
+  # 是否允许真实运动
+  motion_enabled: false       # 测试tcp连接时 false 正式使用 ture
+  tcp_offset: [0, 0, 0, 0, 0, 0]   # 安装夹爪后修改法兰盘偏移 [x, y, z, rx, ry, rz]
   tcp_configured: false
+  # servol控制参数
   lookahead_time: 0.1
   gain: 300
+  # spacemouse -> eef运动映射
   max_translation_speed: 0.05 # vector norm, m/s
   max_rotation_speed: 0.3     # vector norm, rad/s
+  # 安全保护
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
+  # workspace
   watchdog_hz: 10.0
   workspace_min: [-0.60, -0.60, 0.10]
   workspace_max: [0.60, 0.60, 0.80]
-  workspace_configured: false
+  workspace_configured: false # 真实使用Ture
   mock_initial_pose: [0.30, 0.0, 0.30, 0.0, 3.141592653589793, 0.0]
 teleop:
   device_index: 0
