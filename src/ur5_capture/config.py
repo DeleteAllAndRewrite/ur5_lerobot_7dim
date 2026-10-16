@@ -63,6 +63,7 @@ class GripperConfig(StrictModel):
     feedback_source: Literal["mock", "plugin"] = "mock"
     feedback_plugin: str | None = None  # module:Class implementing the physical gripper feedback API
     feedback_kwargs: dict = Field(default_factory=dict)
+    actuation_enabled: bool = False  # explicitly opt in to a plugin's set_grasp()/stop() API
     mock_open_width_m: float = Field(0.08, gt=0, le=0.2)
 
     @model_validator(mode="after")
@@ -72,6 +73,11 @@ class GripperConfig(StrictModel):
                 raise ValueError("feedback_plugin must be 'module:Class'")
         if self.feedback_source == "mock" and self.feedback_plugin is not None:
             raise ValueError("feedback_plugin is only used with feedback_source=plugin")
+        if self.actuation_enabled and (self.feedback_source != "plugin" or not self.feedback_plugin):
+            raise ValueError("Gripper actuation requires a feedback plugin with set_grasp() and stop()")
+        if self.feedback_plugin == "ur5_capture.rg2:RG2Gripper":
+            from .rg2 import RG2Config
+            RG2Config.model_validate(self.feedback_kwargs)
         return self
 
 

@@ -14,7 +14,7 @@ from ur5_capture.geometry import check_target, compose, difference, target_from_
 from ur5_capture.robot import UR5Backend
 from ur5_capture.teleop import SpaceMouseInput
 from ur5_capture.dataset import ACTION_NAMES, STATE_NAMES, build_frame, make_features
-from ur5_capture.gripper import GripperFeedback, GripperSample
+from ur5_capture.gripper import GripperSample
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -23,6 +23,8 @@ class GripperFeedback:
         self.driver = None
         self.connected = False
         self.command = int(cfg.initial_grasp)
+        self._actuating = False
+        self._last_sent = None
 
     def connect(self):
         if self.connected:
@@ -40,9 +42,11 @@ class GripperFeedback:
             module_name, cls_name = self.cfg.feedback_plugin.split(":", 1)
             driver_type = getattr(importlib.import_module(module_name), cls_name)
             self.driver = driver_type(**self.cfg.feedback_kwargs)
-            # The adapter intentionally only reads measurements; it never sends
-            # a grasp command to an unknown physical gripper.
             try:
+                if self.cfg.actuation_enabled and not all(
+                    callable(getattr(self.driver, name, None)) for name in ("set_grasp", "stop")
+                ):
+                    raise TypeError("Actuation plugin must implement set_grasp(grasp) and stop()")
                 self.driver.connect()
             except BaseException:
                 try:
@@ -62,20 +66,41 @@ class GripperFeedback:
             qpos = np.asarray(self.driver.read_qpos(), dtype=np.float64)
         if qpos.shape != (2,) or not np.isfinite(qpos).all():
             raise RuntimeError(f"Invalid gripper feedback: expected finite (2,), received {qpos}")
-        return GripperSample(qpos=qpos.copy(), host_time=time.monotonic())
+        # Cached drivers expose the time of the hardware read, not the time of a cache lookup.
+        host_time = time.monotonic() if self.mock else getattr(self.driver, "sample_host_time", time.monotonic())
+        return GripperSample(qpos=qpos.copy(), host_time=float(host_time))
 
-    def update_command(self, grasp):
+    def update_command(self, grasp, enabled=False):
+        if not self.connected:
+            raise RuntimeError("Gripper feedback not connected")
         if grasp not in (0, 1):
             raise ValueError("Grasp command must be 0 or 1")
-        # Mock simulates an instantaneous response for the NEXT observation.
-        # For physical robots this only updates the local command label. Actual
-        # gripper actuation must be implemented by an independently validated driver.
+        if not self.mock and self.cfg.actuation_enabled:
+            if not enabled:
+                self.stop()
+            elif self._last_sent != grasp:
+                self.driver.set_grasp(int(grasp))
+                self._last_sent = int(grasp)
+                self._actuating = True
+        # Feedback is always read independently, even after an actuator command.
         self.command = int(grasp)
+
+    def stop(self):
+        if self._actuating:
+            try:
+                self.driver.stop()
+            finally:
+                self._actuating = False
+                self._last_sent = None
 
     def disconnect(self):
         try:
-            if self.driver is not None:
-                self.driver.disconnect()
+            try:
+                self.stop()
+            finally:
+                if self.driver is not None:
+                    self.driver.disconnect()
         finally:
             self.driver = None
             self.connected = False
+            self._last_sent = None

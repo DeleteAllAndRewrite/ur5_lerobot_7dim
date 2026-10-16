@@ -22,6 +22,16 @@ class TerminalKeys:
         return self
 
     def read(self):
+        if sys.platform == "win32" and sys.stdin.isatty():
+            import msvcrt
+            if msvcrt.kbhit():
+                key = msvcrt.getwch()
+                if key in ("\x00", "\xe0"):
+                    msvcrt.getwch()  # consume the second half of a Windows special key
+                    return ""
+                if key == "\x03":
+                    raise KeyboardInterrupt
+                return key.lower()
         if self.saved is not None and select.select([sys.stdin], [], [], 0)[0]:
             return sys.stdin.read(1).lower()
         return ""
@@ -71,7 +81,7 @@ def record(cfg, unattended=False):
                     for index in range(frames):
                         key = keys.read()
                         if key == "g":
-                            mouse.toggle_grasp()  # latches desired state, does not actuate real gripper
+                            mouse.toggle_grasp()  # physical execution is gated below by deadman
                         if key in ("s", "d", "q"):
                             decision = key
                             break
@@ -85,10 +95,10 @@ def record(cfg, unattended=False):
                             raise RuntimeError("SpaceMouse stop button pressed")
                         target, delta = target_from_axes(state.pose, sample.axes, cfg, sample.enabled)
                         response = robot.send_target(target, 1 / cfg.dataset.fps, sample.enabled)
+                        robot.update_gripper_command(sample.grasp, enabled=sample.enabled)
                         frame = build_frame(cfg, state, images, target, delta, sample.grasp, sample.enabled,
                                             response["accepted_host_time"], gripper_sample)
                         writer.add(frame)
-                        robot.update_gripper_command(sample.grasp)  # affects mock NEXT state, not current state
                         deadline = start + (index + 1) / cfg.dataset.fps
                         time.sleep(max(0, deadline - time.monotonic()))
             finally:

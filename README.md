@@ -10,7 +10,7 @@
 
 原压缩包自带的 `datasets/mock_three_rgb/` 是**历史 6D state / 6D action** 示例，已保留以免丢失数据；新模拟配置使用 `datasets/mock_three_rgb_8d/`，避免把旧样本当作本次 8D/7D 数据。
 
-**实机反馈要求：** 现有项目未附带具体型号夹爪的测量/执行驱动。为避免误将夹爪 **命令**当作**实际位置**，真实录制在没有配置 `gripper.feedback_plugin` 时将拒绝启动；本项目提供适配接口，需接入真实硬件的两指反馈。模拟模式提供明确标注的合成左右指关节位置，不可当成真实测量。动作中的 `grasp` 仍只作为记录的命令，不会自动驱动物理夹爪。参见 `docs/GRIPPER_FEEDBACK.md`。
+**RG2 夹爪：** 已提供 OnRobot RG2 + Compute Box 的 Modbus TCP 测量/执行驱动，最大开合度 **110 mm**。`grasp=0` 目标张开，`grasp=1` 目标闭合；默认只读反馈，设置 `gripper.actuation_enabled: true` 并按住 deadman 后才执行。RG2 的后两维状态由实测原始总开度 `w` 派生为 `[w/2,-w/2]`（米），不是两个独立编码器。旧款 RG2 直接接 UR 工具数字 I/O 的方式不适用本驱动。参见 [RG2 接入说明](docs/RG2.md) 和 [反馈接口](docs/GRIPPER_FEEDBACK.md)。
 
 LeRobot v0.4.4 官方 writer 负责生成 v3.0；LeRobot v0.3.3 隔离环境负责 v2.1↔v3.0 格式转换。当前仅采 RGB、非 RGB-D；未做实物硬件验证。
 
@@ -41,6 +41,7 @@ flowchart TD
 | `src/ur5_capture/robot.py` | UR RTDE 独立进程、插值、限位和超时停止 |
 | `src/ur5_capture/teleop.py` | SpaceMouse 原始 HID 输入、轴映射、deadman |
 | `src/ur5_capture/gripper.py` | 8D 状态的两指反馈接口；模拟模式和硬件插件模式 |
+| `src/ur5_capture/rg2.py` | RG2 Compute Box Modbus TCP 驱动；110 mm 开度、后台测量与执行 |
 | `src/ur5_capture/cameras.py` | 三台 RealSense 并行 RGB 读取、时间选择、重复帧检测 |
 | `src/ur5_capture/dataset.py` | 特征定义与官方 v3 写入器 |
 | `src/ur5_capture/record.py` | episode 开始、结束、保存、丢弃、异常清理 |
@@ -143,11 +144,12 @@ RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySp
 | `teleop.translation_axes/rotation_axes` | 确认实际 SpaceMouse 各轴方向 |
 | `teleop.*_signs` | 对需要反向的轴填 -1 |
 | `teleop.frame` | `base` 或 `tool`；最终保存的动作统一为 base 坐标 |
-| `gripper.initial_grasp` | 初始夹爪指令状态，0=张开，1=闭合（不会实际执行夹爪运动） |
+| `gripper.initial_grasp` | 初始目标，0=张开，1=闭合；连接时不移动，首次按住 deadman 后可执行 |
 | `gripper.toggle_button` | 可选独立 SpaceMouse 按键索引；没有空闲键就填 `null`，在录制终端按 `g` 切换 |
 | `gripper.feedback_source` | 实机固定 `plugin`，模拟模式固定 `mock` |
-| `gripper.feedback_plugin` | 实机必须设成 `module:Class`，`read_qpos()` 返回左右手指**真实绝对关节位置**；未配置则拒绝启动 |
-| `gripper.feedback_kwargs` | 传给反馈类构造器的参数，如端口、地址等 |
+| `gripper.feedback_plugin` | RG2 使用 `ur5_capture.rg2:RG2Gripper`；其他型号可使用兼容插件 |
+| `gripper.feedback_kwargs` | RG2 填写 Compute Box 的 `host/port/unit_id`、开闭宽度和夹持力等 |
+| `gripper.actuation_enabled` | 默认 false；启用后，按住 deadman 才执行目标，松开停止夹爪运动 |
 | `robot.motion_enabled` | 完成以上配置后设 true |
 | `dataset.root/task/episodes/episode_seconds` | 输出目录、任务描述及采集长度 |
 
@@ -166,7 +168,7 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 4. 结束后 Enter/`s` 保存，`d` 重录，`q` 丢弃并退出。视频编码前先确认停止机器人。
 5. SpaceMouse `stop_button` 或 Ctrl-C 中断采集；当前未完成 episode 丢弃，已经完成的保留。
 
-普通双键 SpaceMouse 默认已把两个按键分别用作 deadman 与停止，因此 `gripper.toggle_button: null`，通过**采集终端 `g` 键**控制夹爪目标状态。若 SpaceMouse 有额外按键，可在 config 中指定第三个未占用键，采集器在按下沿切换 `grasp`。这些输入仅产生记录的命令标签；若要物理夹爪随命令开合，仍需另行接入并测试该型号的执行驱动。**8D 状态必须从独立测量接口获得，不能由动作推断。**
+普通双键 SpaceMouse 默认已把两个按键分别用作 deadman 与停止，因此 `gripper.toggle_button: null`，通过**采集终端 `g` 键**切换夹爪目标（支持 Windows 控制台及 macOS/Linux 终端）。若有第三个未占用按键，可配置为夹爪切换键。使用 RG2 且启用执行时，按住 deadman 才会将目标交给驱动；松开、结束 episode 或退出时停止运动，不自动张开释放物体。**8D 状态始终来自测量，不能由动作推断。**
 
 开始实机联调时先在空旷区域用低速核对单轴方向、TCP、deadman、失联与断帧停止行为。软件停止和 TCP 盒状限位不能代替物理急停，也不做碰撞规划或完整机械臂几何限位检查。Python 伺服进程不提供硬实时保证。
 
@@ -185,7 +187,7 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 | `complementary_info.camera_host_times` | float64[3] | 三路帧到达主机的 monotonic 秒 |
 | `complementary_info.camera_device_times_ms` | float64[3] | 各自设备时间，不假定具有共同起点 |
 | `complementary_info.robot_timestamp` | float64[1] | 控制器时间，秒 |
-| `complementary_info.gripper_host_time` | float64[1] | 夹爪位置读取完成的主机 monotonic 秒 |
+| `complementary_info.gripper_host_time` | float64[1] | 夹爪硬件测量完成的主机 monotonic 秒；RG2 使用后台测量时间 |
 | `complementary_info.robot_host_time` | float64[1] | 控制进程读取状态时的主机时间 |
 | `complementary_info.host_time` | float64[1] | 主循环组装记录时的主机时间 |
 | `complementary_info.command_accepted_time` | float64[1] | 控制进程接受目标命令时的主机时间 |

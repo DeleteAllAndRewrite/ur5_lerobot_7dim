@@ -44,11 +44,23 @@ teleop:
   stop_button: 1
   stale_timeout_s: 0.15
 gripper:
-  initial_grasp: 0           # 0=开 1=闭（只是记录的命令，不驱动物理夹爪）
+  initial_grasp: 0           # 0=开至 110 mm，1=闭至 0 mm；连接时不执行
   toggle_button: null       # 无空闲键就 null，终端按 g 切换
   feedback_source: plugin   # 实机固定 plugin
-  feedback_plugin: null     # <<< 必改：填 "模块:类名"，如 "ur5_capture.gripper_feedback_template:ModbusRTUGripperFeedback"
-  feedback_kwargs: {}       # <<< 必改：驱动连接参数，串口夹爪填 { port: /dev/ttyUSB0, ... }
+  feedback_plugin: "ur5_capture.rg2:RG2Gripper"
+  actuation_enabled: false  # <<< 核实后改 true；执行仍要求按住 deadman
+  feedback_kwargs:
+    host: "192.168.1.1"     # <<< 必改：Compute Box IP；工具 I/O 直连旧 RG2 不适用
+    port: 502
+    unit_id: 65             # 单夹爪 65，双夹爪主/副 66/67
+    max_width_mm: 110.0
+    open_width_mm: 110.0
+    close_width_mm: 0.0
+    force_n: 20.0           # 3..40 N
+    poll_hz: 50.0
+    socket_timeout_s: 0.2
+    feedback_timeout_s: 0.25
+    motion_timeout_s: 5.0
 cameras:
   - name: agentview_1
     role: global

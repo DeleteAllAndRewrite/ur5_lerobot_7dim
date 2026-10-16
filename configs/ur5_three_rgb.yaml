@@ -47,13 +47,24 @@ teleop:
   stop_button: 1             # aborts recording, not a certified emergency stop
   stale_timeout_s: 0.15
 gripper:
-  initial_grasp: 0           # 0=open, 1=closed; commanded action only, NOT measured qpos
+  initial_grasp: 0           # 0=open (110 mm), 1=closed (0 mm); connect does not move
   toggle_button: null       # spacemouse切换grasp指令按键
   feedback_source: plugin   # REQUIRED for real 8D observation.state
-  feedback_plugin: null     # set to "your_driver_module:YourFeedbackClass" before recording
-  feedback_kwargs: {}      # driver-specific connection parameters
-  # Driver read_qpos() must return two REAL measured signed finger-joint positions in meters.
-  # No physical gripper actuator is provided by this project.
+  feedback_plugin: "ur5_capture.rg2:RG2Gripper"
+  actuation_enabled: false  # 核对接线/开度/力后改 true；按住 deadman 才执行
+  feedback_kwargs:
+    host: "192.168.1.1"     # OnRobot Compute Box IP，不是 UR5 IP；旧款工具 I/O 直连不适用
+    port: 502
+    unit_id: 65             # 单夹爪 65，双夹爪主/副 66/67
+    max_width_mm: 110.0
+    open_width_mm: 110.0
+    close_width_mm: 0.0
+    force_n: 20.0           # RG2: 3..40 N
+    poll_hz: 50.0
+    socket_timeout_s: 0.2
+    feedback_timeout_s: 0.25
+    motion_timeout_s: 5.0
+  # 状态后两维是实测原始总开度派生的 [w/2,-w/2]（米），不是两个独立编码器。
 cameras:
   - name: agentview_1
     role: global

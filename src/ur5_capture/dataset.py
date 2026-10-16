@@ -97,8 +97,9 @@ class V3Writer:
             "action_timing": "Observation sampled before command; target approached over 1/fps. Not measured next-state delta.",
             "nominal_timestamp": "frame_index/fps; actual times retained separately using host monotonic clock",
             "synchronization": "Software selection by host frame arrival, not synchronized RGB exposure",
-            "gripper": "action.grasp is a binary command (0=open, 1=closed), independent of observation.state[6:8] feedback. No real actuation without a separate hardware driver.",
+            "gripper": "action.grasp is a requested binary target (0=open, 1=closed), independent of measured feedback. Physical execution requires actuation_enabled and deadman. RG2 qpos is derived from measured raw width as [w/2,-w/2], not independent encoders.",
             "gripper_feedback_source": cfg.gripper.feedback_source,
+            "gripper_actuation_enabled": cfg.gripper.actuation_enabled,
         }
         (self.root / "meta" / "capture_config.json").write_text(
             json.dumps(provenance, indent=2, ensure_ascii=False), encoding="utf-8")
