@@ -1,4 +1,4 @@
-"""RTDE ownership lives in a spawned process, isolated from image encoding/GIL stalls."""
+"""Robot motion ownership lives in a spawned process, isolated from recorder stalls."""
 import multiprocessing as mp
 import time
 import traceback
@@ -29,11 +29,21 @@ def _worker(config, mock, shared, connection, quit_event):
             receive = rtde_receive.RTDEReceiveInterface(cfg.ip, cfg.control_hz)
             if not receive.isConnected() or receive.getRobotMode() != 7:
                 raise RuntimeError("UR controller must be powered on and in RUNNING mode")
-            control = rtde_control.RTDEControlInterface(cfg.ip, cfg.control_hz)
+            # Reuse pendant External Control program.  The default ur_rtde flag
+            # uploads/replaces a control script and would remove rg2_worker_thread().
+            control = rtde_control.RTDEControlInterface(
+                cfg.ip, cfg.control_hz,
+                rtde_control.RTDEControlInterface.FLAG_USE_EXT_UR_CAP,
+                cfg.ur_cap_port,
+            )
             if not control.isConnected():
                 raise RuntimeError("RTDE control connection failed")
             if not control.setTcp(list(cfg.tcp_offset)):
-                raise RuntimeError("setTcp failed")
+                raise RuntimeError(
+                    "ur_rtde External Control API rejected setTcp; load an External Control "
+                    "URCap program compatible with ur_rtde on the pendant and set its "
+                    f"server port to {cfg.ur_cap_port}"
+                )
             if not control.setWatchdog(cfg.watchdog_hz):
                 raise RuntimeError("Controller watchdog could not be enabled")
         pose = vector(cfg.mock_initial_pose)
@@ -108,7 +118,7 @@ def _worker(config, mock, shared, connection, quit_event):
                 check_target(pose, target, cfg)
                 if control is not None:
                     command_pose = interpolate(start, target, (now - segment_start + 1 / cfg.control_hz) / duration)
-                    if not control.servoL(command_pose.tolist(), cfg.max_translation_speed,
+                    if not control.servoL(command_pose.tolist(), cfg.high_translation_speed,
                                           0.1, 1 / cfg.control_hz, cfg.lookahead_time, cfg.gain):
                         raise RuntimeError("servoL failed")
             next_tick += 1 / cfg.control_hz
@@ -211,9 +221,12 @@ class UR5Backend:
         return self._response()
 
     def stop(self):
-        if self.started and self.process.is_alive():
-            self.connection.send({"kind": "stop"})
-            self._response()
+        if not self.started:
+            return
+        if not self.process.is_alive():
+            return
+        self.connection.send({"kind": "stop"})
+        self._response()
 
     def disconnect(self):
         try:

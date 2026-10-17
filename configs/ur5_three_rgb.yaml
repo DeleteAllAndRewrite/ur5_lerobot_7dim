@@ -6,34 +6,38 @@ dataset:
   fps: 30
   task: Pick up the object and place it in the target area
   episodes: 10
-  episode_seconds: 30.0
+  episode_seconds: 300.0
   image_writer_threads: 6
   vcodec: h264
 robot:
   # 机器人连接
-  ip: 192.168.1.10
+  ip: 192.168.100.100
   controller: cb3             # UR5 CB3: 125 Hz; UR5e: e_series up to 500 Hz
+  motion_backend: ur_rtde   # Direct ur_rtde control; do not run ur_robot_driver
+  ur_cap_port: 50002        # Must match External Control URCap server port
   # 控制频率
   control_hz: 125
   # 是否允许真实运动
-  motion_enabled: false       # 测试tcp连接时 false 正式使用 ture
+  motion_enabled: true       # 测试tcp连接时 false 正式使用 ture
   tcp_offset: [0, 0, 0, 0, 0, 0]   # 安装夹爪后修改法兰盘偏移 [x, y, z, rx, ry, rz]
-  tcp_configured: false
+  tcp_configured: true
   # servol控制参数
   lookahead_time: 0.1
   gain: 300
   # spacemouse -> eef运动映射
-  max_translation_speed: 0.05 # vector norm, m/s
-  max_rotation_speed: 0.3     # vector norm, rad/s
+  max_translation_speed: 0.15 # vector norm, m/s
+  max_rotation_speed: 0.5     # vector norm, rad/s
+  high_translation_speed: 0.30 # button 1 toggles high/low
+  high_rotation_speed: 0.8
   # 安全保护
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
   # workspace
   watchdog_hz: 10.0
-  workspace_min: [-0.60, -0.60, 0.10]
+  workspace_min: [-0.60, -0.60, 0.05]
   workspace_max: [0.60, 0.60, 0.80]
-  workspace_configured: false # 真实使用Ture
+  workspace_configured: true # 真实使用Ture
   mock_initial_pose: [0.30, 0.0, 0.30, 0.0, 3.141592653589793, 0.0]
 teleop:
   device_index: 0
@@ -43,23 +47,21 @@ teleop:
   translation_signs: [1, 1, 1]
   rotation_signs: [1, 1, 1]
   frame: base                # base or tool; saved action always expressed in base
-  deadman_button: 0          # hold to move; release stops
-  stop_button: 1             # aborts recording, not a certified emergency stop
+  speed_toggle_button: 1     # press edge toggles low/high speed
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0           # 0=open (110 mm), 1=closed (0 mm); connect does not move
-  toggle_button: null       # spacemouse切换grasp指令按键
+  toggle_button: 0           # press edge toggles commanded grasp; terminal g also works
   feedback_source: plugin   # REQUIRED for real 8D observation.state
-  feedback_plugin: "ur5_capture.rg2:RG2Gripper"
-  actuation_enabled: false  # 核对接线/开度/力后改 true；按住 deadman 才执行
+  feedback_plugin: "ur5_capture.rg2:RTDEGripper"
+  actuation_enabled: true  # 核对接线/开度/力后启用；切换目标时执行
   feedback_kwargs:
-    host: "192.168.1.1"     # OnRobot Compute Box IP，不是 UR5 IP；旧款工具 I/O 直连不适用
-    port: 502
-    unit_id: 65             # 单夹爪 65，双夹爪主/副 66/67
+    robot_ip: "192.168.100.100" # UR5 控制器 IP；RG2 通过 RTDE 寄存器控制
+    port: 30004
     max_width_mm: 110.0
     open_width_mm: 110.0
     close_width_mm: 0.0
-    force_n: 20.0           # RG2: 3..40 N
+    force_n: 20.0           # worker accepts 4..40 N
     poll_hz: 50.0
     socket_timeout_s: 0.2
     feedback_timeout_s: 0.25
@@ -68,19 +70,19 @@ gripper:
 cameras:
   - name: agentview_1
     role: global
-    serial: REPLACE_CAMERA_SERIAL_1. # 相机序列号
+    serial: "039222250102" # 相机序列号
     width: 640
     height: 480
     fps: 30
   - name: agentview_2
     role: global
-    serial: REPLACE_CAMERA_SERIAL_2
+    serial: "043422252060"
     width: 640
     height: 480
     fps: 30
   - name: eye_in_hand
     role: eye_in_hand
-    serial: REPLACE_CAMERA_SERIAL_3
+    serial: "419522072783"
     width: 640
     height: 480
     fps: 30

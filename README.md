@@ -10,7 +10,7 @@
 
 原压缩包自带的 `datasets/mock_three_rgb/` 是**历史 6D state / 6D action** 示例，已保留以免丢失数据；新模拟配置使用 `datasets/mock_three_rgb_8d/`，避免把旧样本当作本次 8D/7D 数据。
 
-**RG2 夹爪：** 已提供 OnRobot RG2 + Compute Box 的 Modbus TCP 测量/执行驱动，最大开合度 **110 mm**。`grasp=0` 目标张开，`grasp=1` 目标闭合；默认只读反馈，设置 `gripper.actuation_enabled: true` 并按住 deadman 后才执行。RG2 的后两维状态由实测原始总开度 `w` 派生为 `[w/2,-w/2]`（米），不是两个独立编码器。旧款 RG2 直接接 UR 工具数字 I/O 的方式不适用本驱动。参见 [RG2 接入说明](docs/RG2.md) 和 [反馈接口](docs/GRIPPER_FEEDBACK.md)。
+**RG2 夹爪：** 当前实机链路使用 UR5 RTDE 寄存器读写，最大开合度 **110 mm**。`grasp=0` 目标张开，`grasp=1` 目标闭合；设置 `gripper.actuation_enabled: true` 后，目标切换时下发夹爪命令。SpaceMouse 按键 0 与终端 `g` 都会切换目标。RTDE worker 回报的目标总开度 `w` 派生为 `[w/2,-w/2]`（米）；该旧式工具 I/O 链路不提供独立编码器测量。参见 [RG2 接入说明](docs/RG2.md) 和 [反馈接口](docs/GRIPPER_FEEDBACK.md)。
 
 LeRobot v0.4.4 官方 writer 负责生成 v3.0；LeRobot v0.3.3 隔离环境负责 v2.1↔v3.0 格式转换。当前仅采 RGB、非 RGB-D；未做实物硬件验证。
 
@@ -25,7 +25,7 @@ flowchart TD
     V --> L
     R --> L
     L --> P["独立 RTDE 伺服进程"]
-    P --> U["UR5 servoL"]
+    P --> U["UR RTDE servoL"]
     U --> R
     L --> D["官方 LeRobotDataset v3"]
     D --> F["Parquet、MP4、元数据"]
@@ -35,13 +35,13 @@ flowchart TD
 |---|---|
 | `lerobot/` | 官方 LeRobot v0.4.4 源码快照；包含完整 src 与安装文件，不含媒体、示例和上游测试 |
 | `compat/lerobot_v21/` | 官方 v0.3.3 源码快照，供隔离转换环境使用 |
-| `configs/ur5_three_rgb.yaml` | 实机配置，默认不启用运动 |
+| `configs/ur5_three_rgb.yaml` | 实机配置；使用 UR RTDE 和 RTDE 寄存器 RG2 |
 | `configs/mock.yaml` | 不依赖实物的三视角演示配置 |
 | `src/ur5_capture/lerobot_bridge.py` | 继承官方 `Robot` / `Teleoperator` 的适配类 |
-| `src/ur5_capture/robot.py` | UR RTDE 独立进程、插值、限位和超时停止 |
-| `src/ur5_capture/teleop.py` | SpaceMouse 原始 HID 输入、轴映射、deadman |
+| `src/ur5_capture/robot.py` | UR RTDE 独立进程、限位和超时停止 |
+| `src/ur5_capture/teleop.py` | SpaceMouse 原始 HID 输入、轴映射、夹爪与速度档按键 |
 | `src/ur5_capture/gripper.py` | 8D 状态的两指反馈接口；模拟模式和硬件插件模式 |
-| `src/ur5_capture/rg2.py` | RG2 Compute Box Modbus TCP 驱动；110 mm 开度、后台测量与执行 |
+| `src/ur5_capture/rg2.py` | RG2 Modbus/UR RTDE 驱动；110 mm 开度、后台状态与执行 |
 | `src/ur5_capture/cameras.py` | 三台 RealSense 并行 RGB 读取、时间选择、重复帧检测 |
 | `src/ur5_capture/dataset.py` | 特征定义与官方 v3 写入器 |
 | `src/ur5_capture/record.py` | episode 开始、结束、保存、丢弃、异常清理 |
@@ -64,13 +64,14 @@ flowchart TD
 
 ```bash
 # 1. 创建并进入 Conda 环境（不是 venv）
-conda create -n ur5-lerobot-v3 -c conda-forge python=3.11 -y
+conda create -n ur5-lerobot-v3 -c conda-forge python=3.12 -y
 conda activate ur5-lerobot-v3
 
 # 2. 安装系统级视频编解码工具和固定的项目依赖
 conda install -c conda-forge ffmpeg -y
 python -m pip install --upgrade pip
 python -m pip install -r requirements/v3.txt
+python -m pip install -e .
 
 # 3. 使用本项目内的官方 LeRobot 源码，不自动拉取新版 LeRobot
 python -m pip install -e ./lerobot --no-deps
@@ -124,10 +125,14 @@ conda activate ur5-lerobot-v3
 ```bash
 conda activate ur5-lerobot-v3
 python -m pip install -e '.[hardware]'
+# Ubuntu / Debian：easyhid 需要 hidraw 后端；仅安装 Python hidapi 包或 libusb 后端不够
+sudo apt-get install libhidapi-hidraw0
 ur5-capture devices
 ```
 
 RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySpaceMouse 2.0 的原始 HID 接口，需要 hidapi 系统库及 hidraw 访问权限。依照设备官方安装说明配置，避免其他 SpaceMouse 驱动独占设备。
+
+若出现 `undefined symbol: hid_enumerate` 或 `HID API is probably not installed`，先安装上述 `libhidapi-hidraw0`，再重试。可在采集环境运行 `python -c 'from ctypes.util import find_library; print(find_library("hidapi-hidraw"))'`，应返回 `libhidapi-hidraw.so.0`。若能列出设备但无法打开，再检查 hidraw 的 udev 权限。
 
 编辑 `configs/ur5_three_rgb.yaml`：
 
@@ -135,6 +140,8 @@ RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySp
 |---|---|
 | `robot.ip` | UR5 控制器地址；主机与机器人网络可达 |
 | `robot.controller` | 普通 UR5 设 `cb3`，UR5e 才设 `e_series` |
+| `robot.motion_backend` | 固定使用 `ur_rtde`；示教器加载兼容 `ur_rtde` 的 External Control URCap |
+| `robot.ur_cap_port` | External Control URCap 服务端口；必须与 YAML 一致，默认 `50005` |
 | `robot.control_hz` | 默认 125；CB3 配置禁止超过 125 |
 | `robot.tcp_offset` | 实测工具相对法兰偏移，单位 m、旋转向量 rad |
 | `robot.tcp_configured` | 完成 TCP 配置后改为 true |
@@ -144,16 +151,25 @@ RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySp
 | `teleop.translation_axes/rotation_axes` | 确认实际 SpaceMouse 各轴方向 |
 | `teleop.*_signs` | 对需要反向的轴填 -1 |
 | `teleop.frame` | `base` 或 `tool`；最终保存的动作统一为 base 坐标 |
-| `gripper.initial_grasp` | 初始目标，0=张开，1=闭合；连接时不移动，首次按住 deadman 后可执行 |
-| `gripper.toggle_button` | 可选独立 SpaceMouse 按键索引；没有空闲键就填 `null`，在录制终端按 `g` 切换 |
+| `gripper.initial_grasp` | 初始目标，0=张开，1=闭合；连接时不移动 |
+| `gripper.toggle_button` | SpaceMouse 夹爪切换键索引；当前配置为按键 0，终端 `g` 也可切换 |
+| `teleop.speed_toggle_button` | SpaceMouse 速度档切换键索引；当前配置为按键 1 |
+| `robot.max_translation_speed/max_rotation_speed` | 低速档线速度/角速度上限 |
+| `robot.high_translation_speed/high_rotation_speed` | 高速档线速度/角速度上限；按键 1 切换 |
 | `gripper.feedback_source` | 实机固定 `plugin`，模拟模式固定 `mock` |
-| `gripper.feedback_plugin` | RG2 使用 `ur5_capture.rg2:RG2Gripper`；其他型号可使用兼容插件 |
-| `gripper.feedback_kwargs` | RG2 填写 Compute Box 的 `host/port/unit_id`、开闭宽度和夹持力等 |
-| `gripper.actuation_enabled` | 默认 false；启用后，按住 deadman 才执行目标，松开停止夹爪运动 |
+| `gripper.feedback_plugin` | RG2 使用 `ur5_capture.rg2:RTDEGripper`；其他型号可使用兼容插件 |
+| `gripper.feedback_kwargs` | RG2 填写 UR5 `robot_ip`、RTDE `port`、寄存器映射、开闭宽度和夹持力 |
+| `gripper.actuation_enabled` | 默认 false；启用后，夹爪目标切换时下发执行命令 |
 | `robot.motion_enabled` | 完成以上配置后设 true |
 | `dataset.root/task/episodes/episode_seconds` | 输出目录、任务描述及采集长度 |
 
 机械臂应已完成启动、制动器释放、工具负载设置，处于允许远程 RTDE 控制的状态；本项目不自动开机、解锁保护停机或执行回零。不同 UR5 控制器/PolyScope 版本的远程模式需按设备说明设置。
+
+当前实机配置直接使用 `ur_rtde` 控制机械臂。不要启动 ROS `ur_robot_driver`，否则会占用默认 External Control 端口。示教器加载兼容 `ur_rtde` 的 External Control URCap 程序，并把服务端口设为 YAML 中的 `robot.ur_cap_port`（默认 `50005`），确认机器人处于 RUNNING 状态。
+
+另一个终端再执行采集命令。示教器必须加载包含 RG2 worker 线程的 `external_control_rg2.urp`；否则 RG2 RTDE 寄存器能连接但不会 ack。
+
+采集进程里的 `RTDEGripper` 独占 RTDE 寄存器 24--28；不要同时运行其他 RTDE register client，否则会争抢同一组 input registers。
 
 ```bash
 ur5-capture validate --config configs/ur5_three_rgb.yaml
@@ -162,15 +178,15 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 
 交互方式：
 
-1. Enter 开始 episode。
-2. 按住 SpaceMouse `deadman_button` 才允许运动，松开后停止伺服运动。
-3. 采集中按 `g` 切换 `grasp` 指令状态（0/1，保持到下次切换）；`s` 提前结束；`d` 丢弃；`q` 丢弃当前 episode 并退出。
-4. 结束后 Enter/`s` 保存，`d` 重录，`q` 丢弃并退出。视频编码前先确认停止机器人。
-5. SpaceMouse `stop_button` 或 Ctrl-C 中断采集；当前未完成 episode 丢弃，已经完成的保留。
+1. Enter 开始 episode；无需按 SpaceMouse 按键 0。
+2. SpaceMouse 摇杆轴直接控制机械臂。按键 0 按下沿切换 `grasp` 指令（0 张开、1 闭合）；终端 `g` 效果相同。
+3. 按键 1 按下沿切换低速/高速档。低速档默认 `0.05 m/s、0.3 rad/s`，高速档默认 `0.15 m/s、0.8 rad/s`。
+4. 终端 `s` 提前结束 episode；`d` 丢弃；`q` 丢弃当前 episode 并退出。结束后 Enter/`s` 保存，`d` 重录，`q` 丢弃并退出。
+5. Ctrl-C 中断采集；当前未完成 episode 丢弃，已经完成的保留。紧急情况使用示教器实体急停。
 
-普通双键 SpaceMouse 默认已把两个按键分别用作 deadman 与停止，因此 `gripper.toggle_button: null`，通过**采集终端 `g` 键**切换夹爪目标（支持 Windows 控制台及 macOS/Linux 终端）。若有第三个未占用按键，可配置为夹爪切换键。使用 RG2 且启用执行时，按住 deadman 才会将目标交给驱动；松开、结束 episode 或退出时停止运动，不自动张开释放物体。**8D 状态始终来自测量，不能由动作推断。**
+按键 0 和 1 都是按下沿触发，按住不会重复切换。夹爪执行还要求 `gripper.actuation_enabled: true`；关闭时只记录目标，不驱动物理夹爪。结束 episode、异常或退出时会停止软件伺服并取消尚未发送的夹爪目标，不自动张开放开物体。RTDE worker 没有独立停止寄存器，已发送的 RG2 命令由 worker 完成。**8D 状态不能当作独立编码器测量。**
 
-开始实机联调时先在空旷区域用低速核对单轴方向、TCP、deadman、失联与断帧停止行为。软件停止和 TCP 盒状限位不能代替物理急停，也不做碰撞规划或完整机械臂几何限位检查。Python 伺服进程不提供硬实时保证。
+开始实机联调时先在空旷区域用低速核对单轴方向、TCP、速度档、失联与断帧停止行为。软件停止和 TCP 盒状限位不能代替物理急停，也不做碰撞规划或完整机械臂几何限位检查。Python 伺服进程不提供硬实时保证。
 
 ## 4. 数据定义
 
@@ -179,7 +195,7 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 | `observation.images.agentview_1` | H×W×3，RGB uint8 输入 | 全局视角 1，存 MP4 |
 | `observation.images.agentview_2` | H×W×3，RGB uint8 输入 | 全局视角 2，存 MP4 |
 | `observation.images.eye_in_hand` | H×W×3，RGB uint8 输入 | 手眼相机，存 MP4 |
-| `observation.state` | **float32[8]** | 绝对 `[x,y,z,rx,ry,rz,left_finger_qpos_m,right_finger_qpos_m]`；前 6D 是实测 TCP，后 2D 为真实插件反馈或明确标注的 mock 模拟反馈 |
+| `observation.state` | **float32[8]** | 绝对 `[x,y,z,rx,ry,rz,left_finger_qpos_m,right_finger_qpos_m]`；前 6D 是实测 TCP，后 2D 为插件反馈或 mock 模拟反馈；RTDE RG2 后 2D 为 worker 回报目标宽度 |
 | `action` | **float32[7]** | `[dx,dy,dz,drx,dry,drz,grasp]`；前六维为本周期目标 TCP 增量，第七维为二值夹爪指令状态（0 张开，1 闭合） |
 | `observation.joint_positions` | float32[6] | 六关节位置，rad，作为附加观测 |
 | `complementary_info.target_pose` | float32[6] | 裁剪后提交且被控制进程接收的 TCP 目标 |
@@ -187,15 +203,15 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 | `complementary_info.camera_host_times` | float64[3] | 三路帧到达主机的 monotonic 秒 |
 | `complementary_info.camera_device_times_ms` | float64[3] | 各自设备时间，不假定具有共同起点 |
 | `complementary_info.robot_timestamp` | float64[1] | 控制器时间，秒 |
-| `complementary_info.gripper_host_time` | float64[1] | 夹爪硬件测量完成的主机 monotonic 秒；RG2 使用后台测量时间 |
+| `complementary_info.gripper_host_time` | float64[1] | 夹爪反馈样本完成的主机 monotonic 秒；RTDE RG2 为 worker 状态报文时间 |
 | `complementary_info.robot_host_time` | float64[1] | 控制进程读取状态时的主机时间 |
 | `complementary_info.host_time` | float64[1] | 主循环组装记录时的主机时间 |
 | `complementary_info.command_accepted_time` | float64[1] | 控制进程接受目标命令时的主机时间 |
-| `complementary_info.deadman` | int64[1] | 本帧运动使能状态 |
+| `complementary_info.motion_enabled` | int64[1] | 本帧运动使能状态 |
 
 位置单位 m；姿态是旋转向量（轴角），**不是欧拉角**。旋转增量满足 `R_target = Exp(dr) @ R_observed`。输入设为 tool 坐标时先正确进行旋转复合，再把最终动作转换为 base 坐标保存。
 
-夹爪指令使用锁存状态，不是夹爪增量，也不是实测开度。`observation.state[6:8]` 则是左右指的**绝对位置**（单位 m），从单独的夹爪反馈对象读取，**不是** `action[6]` 的复制或变换；mock 使用模拟反馈。`complementary_info.deadman` 单独保存运动使能；它不属于 7 维动作。LeRobot Robot/Teleoperator 直连控制接口为安全起见另有一个 `enabled` 字段，但数据集中的 `action` 只有七维。
+夹爪指令使用锁存状态，不是夹爪增量，也不是实测开度。`observation.state[6:8]` 则是左右指的**绝对位置**（单位 m），从单独的夹爪反馈对象读取，**不是** `action[6]` 的复制或变换；mock 使用模拟反馈。`complementary_info.motion_enabled` 单独保存本帧运动使能；它不属于 7 维动作。LeRobot Robot/Teleoperator 直连控制接口另有一个 `enabled` 字段，但 SpaceMouse 不再使用 deadman 按键。
 
 每行表达：先获取 `observation_t`（含 EEF 与夹爪反馈），再提交 `action_t`，目标在一个 `1/fps` 周期内插值逼近。`action` 是目标命令增量，**不等于实测 `state[t+1] - state[t]`**，也不是机器人内部实际已执行位移。`target_pose` 是目标端点，不是 125 Hz 的每个内部插值设定点。
 

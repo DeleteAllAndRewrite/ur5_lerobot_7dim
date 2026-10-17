@@ -11,7 +11,7 @@ import pytest
 
 from ur5_capture.config import GripperConfig, load_config
 from ur5_capture.gripper import GripperFeedback
-from ur5_capture.rg2 import RG2Config, RG2Gripper, _ModbusTCP
+from ur5_capture.rg2 import RG2Config, RG2Gripper, RTDEGripper, _ModbusTCP
 
 
 def eventually(predicate, timeout=1.0):
@@ -296,8 +296,99 @@ def test_feedback_only_plugin_requires_actuator_api_only_when_enabled(monkeypatc
 def test_rg2_config_is_validated_before_connecting():
     cfg = load_config("configs/ur5_three_rgb.yaml")
     assert cfg.gripper.feedback_kwargs["max_width_mm"] == 110
-    assert cfg.gripper.actuation_enabled is False
+    assert cfg.gripper.actuation_enabled is True
     data = cfg.gripper.model_dump()
     data["feedback_kwargs"]["force_n"] = 50
     with pytest.raises(ValueError):
         GripperConfig.model_validate(data)
+
+
+class FakeRTDEClient:
+    """Deterministic register peer for RTDEGripper worker tests."""
+
+    def __init__(self, error=0):
+        self.connected = False
+        self.closed = False
+        self.error = error
+        self.status = (0, 0, 1100, 0, error)
+        self.sent = []
+        self._lock = threading.Lock()
+
+    def connect(self):
+        self.connected = True
+
+    def close(self):
+        self.connected = False
+        self.closed = True
+
+    def read(self):
+        with self._lock:
+            return self.status if self.connected else None
+
+    def send(self, width, force, sequence):
+        with self._lock:
+            self.sent.append((width, force, sequence))
+            self.status = (sequence, 2, round(width * 10), 0, 0)
+
+
+def make_rtde_driver(fake=None, **kwargs):
+    driver = RTDEGripper(robot_ip="robot", **kwargs)
+    fake = fake or FakeRTDEClient()
+    driver._client = fake
+    return driver, fake
+
+
+def test_rtde_connect_reads_status_and_disconnects():
+    driver, fake = make_rtde_driver()
+    driver.connect()
+    try:
+        np.testing.assert_allclose(driver.read_qpos(), [0.055, -0.055])
+    finally:
+        driver.disconnect()
+    assert fake.closed
+    assert driver._thread is None
+
+
+def test_rtde_command_is_sent_and_acknowledged():
+    driver, fake = make_rtde_driver()
+    driver.connect()
+    try:
+        driver.set_grasp(1)
+        eventually(lambda: len(fake.sent) == 1)
+        assert fake.sent[0][:2] == (0.0, 20.0)
+        eventually(lambda: driver._inflight is None)
+    finally:
+        driver.disconnect()
+
+
+def test_rtde_controller_error_fails_connect():
+    driver, fake = make_rtde_driver(FakeRTDEClient(error=2))
+    with pytest.raises(RuntimeError, match="controller error code: 2"):
+        driver.connect()
+    assert fake.closed
+
+
+def test_rtde_duplicate_target_is_suppressed():
+    driver, fake = make_rtde_driver()
+    driver.connect()
+    try:
+        driver.set_grasp(1)
+        driver.set_grasp(1)
+        eventually(lambda: len(fake.sent) == 1)
+        time.sleep(0.03)
+        assert len(fake.sent) == 1
+    finally:
+        driver.disconnect()
+
+
+def test_rtde_stop_allows_resubmitting_same_target():
+    driver, fake = make_rtde_driver()
+    driver.connect()
+    try:
+        driver.set_grasp(1)
+        eventually(lambda: len(fake.sent) == 1 and driver._inflight is None)
+        driver.stop()
+        driver.set_grasp(1)
+        eventually(lambda: len(fake.sent) == 2)
+    finally:
+        driver.disconnect()

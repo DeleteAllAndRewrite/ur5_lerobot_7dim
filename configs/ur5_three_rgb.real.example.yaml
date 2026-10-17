@@ -14,16 +14,20 @@ dataset:
   image_writer_threads: 6
   vcodec: h264
 robot:
-  ip: 192.168.1.10            # <<< 必改：你的 UR5 实际 IP，主机需可达
+  ip: 192.168.100.100            # <<< 必改：你的 UR5 实际 IP，主机需可达
   controller: cb3             # <<< 必改：UR5=cb3，UR5e=e_series
+  motion_backend: ur_rtde   # Direct ur_rtde control; do not run ur_robot_driver
+  ur_cap_port: 50005        # Must match External Control URCap server port
   control_hz: 125             # CB3 上限 125，e_series 可更高
   motion_enabled: false       # <<< 最后一步：全部确认后改 true（record 强制要求）
   tcp_offset: [0, 0, 0, 0, 0, 0]  # <<< 必改：实测法兰->工具 TCP 偏移，m + 轴角 rad
   tcp_configured: false       # <<< 必改：完成 TCP 标定后改 true
   lookahead_time: 0.1
   gain: 300
-  max_translation_speed: 0.05 # 线速度上限 m/s
-  max_rotation_speed: 0.3     # 角速度上限 rad/s
+  max_translation_speed: 0.15 # 低速档线速度上限 m/s
+  max_rotation_speed: 0.5     # 低速档角速度上限 rad/s
+  high_translation_speed: 0.30 # 按键 1 切换高速档
+  high_rotation_speed: 0.8
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
@@ -40,23 +44,21 @@ teleop:
   translation_signs: [1, 1, 1] # 按需：方向反了就填 -1
   rotation_signs: [1, 1, 1]
   frame: base                # base 或 tool
-  deadman_button: 0          # 按住才动，松开停
-  stop_button: 1
+  speed_toggle_button: 1     # 按下沿切换低速/高速
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0           # 0=开至 110 mm，1=闭至 0 mm；连接时不执行
-  toggle_button: null       # 无空闲键就 null，终端按 g 切换
+  toggle_button: 0           # 按下沿切换夹爪；终端 g 同样有效
   feedback_source: plugin   # 实机固定 plugin
-  feedback_plugin: "ur5_capture.rg2:RG2Gripper"
-  actuation_enabled: false  # <<< 核实后改 true；执行仍要求按住 deadman
+  feedback_plugin: "ur5_capture.rg2:RTDEGripper"
+  actuation_enabled: false  # <<< 核实后改 true；切换目标时执行
   feedback_kwargs:
-    host: "192.168.1.1"     # <<< 必改：Compute Box IP；工具 I/O 直连旧 RG2 不适用
-    port: 502
-    unit_id: 65             # 单夹爪 65，双夹爪主/副 66/67
+    robot_ip: "192.168.1.10" # <<< 必改：与 robot.ip 一致
+    port: 30004
     max_width_mm: 110.0
     open_width_mm: 110.0
     close_width_mm: 0.0
-    force_n: 20.0           # 3..40 N
+    force_n: 20.0           # worker accepts 4..40 N
     poll_hz: 50.0
     socket_timeout_s: 0.2
     feedback_timeout_s: 0.25
