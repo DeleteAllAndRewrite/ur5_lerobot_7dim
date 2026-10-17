@@ -25,7 +25,11 @@ class DatasetConfig(StrictModel):
 class RobotConfig(StrictModel):
     ip: str = "192.168.1.10"
     controller: Literal["cb3", "e_series"] = "cb3"
+    motion_backend: Literal["ur_rtde"] = "ur_rtde"
     control_hz: int = Field(125, ge=30, le=500)
+    # Local port used by the URCap External Control server. Must not collide
+    # with ur_robot_driver (50002 by default).
+    ur_cap_port: int = Field(50005, ge=1024, le=65535)
     motion_enabled: bool = False
     tcp_offset: tuple[float, float, float, float, float, float] = (0, 0, 0, 0, 0, 0)
     tcp_configured: bool = False
@@ -33,6 +37,8 @@ class RobotConfig(StrictModel):
     gain: int = Field(300, ge=100, le=2000)
     max_translation_speed: float = Field(0.05, gt=0, le=0.25)
     max_rotation_speed: float = Field(0.3, gt=0, le=1)
+    high_translation_speed: float = Field(0.15, gt=0, le=0.4)
+    high_rotation_speed: float = Field(0.8, gt=0, le=1)
     max_tracking_translation: float = Field(0.03, gt=0)
     max_tracking_rotation: float = Field(0.2, gt=0)
     command_timeout_s: float = Field(0.15, gt=0, le=0.5)
@@ -51,8 +57,7 @@ class TeleopConfig(StrictModel):
     translation_signs: tuple[Literal[-1, 1], Literal[-1, 1], Literal[-1, 1]] = (1, 1, 1)
     rotation_signs: tuple[Literal[-1, 1], Literal[-1, 1], Literal[-1, 1]] = (1, 1, 1)
     frame: Literal["base", "tool"] = "base"
-    deadman_button: int = Field(0, ge=0)
-    stop_button: int = Field(1, ge=0)
+    speed_toggle_button: int = Field(1, ge=0)
     stale_timeout_s: float = Field(0.15, gt=0, le=0.5)
 
 
@@ -75,9 +80,11 @@ class GripperConfig(StrictModel):
             raise ValueError("feedback_plugin is only used with feedback_source=plugin")
         if self.actuation_enabled and (self.feedback_source != "plugin" or not self.feedback_plugin):
             raise ValueError("Gripper actuation requires a feedback plugin with set_grasp() and stop()")
-        if self.feedback_plugin == "ur5_capture.rg2:RG2Gripper":
-            from .rg2 import RG2Config
-            RG2Config.model_validate(self.feedback_kwargs)
+        if self.feedback_plugin in ("ur5_capture.rg2:RG2Gripper", "ur5_capture.rg2:RTDEGripper"):
+            from .rg2 import RG2Config, RTDEConfig
+            (RG2Config if self.feedback_plugin.endswith(":RG2Gripper") else RTDEConfig).model_validate(
+                self.feedback_kwargs
+            )
         return self
 
 
@@ -129,12 +136,14 @@ class CaptureConfig(StrictModel):
             raise ValueError("command timeout must exceed one recording period")
         if np.any(np.array(r.workspace_min) >= r.workspace_max):
             raise ValueError("workspace_min must be below workspace_max")
+        if r.high_translation_speed < r.max_translation_speed:
+            raise ValueError("high_translation_speed must be >= max_translation_speed")
+        if r.high_rotation_speed < r.max_rotation_speed:
+            raise ValueError("high_rotation_speed must be >= max_rotation_speed")
         if sorted(t.translation_axes + t.rotation_axes) != list(range(6)):
             raise ValueError("Axis mapping must be a permutation of 0..5")
-        if t.deadman_button == t.stop_button:
-            raise ValueError("Deadman and stop buttons must differ")
-        if self.gripper.toggle_button in (t.deadman_button, t.stop_button):
-            raise ValueError("Gripper toggle must not reuse deadman/stop buttons")
+        if self.gripper.toggle_button == t.speed_toggle_button:
+            raise ValueError("Gripper and speed toggle buttons must differ")
         if self.mode == "real" and self.gripper.feedback_source != "plugin":
             raise ValueError("Real capture must use measured gripper feedback (feedback_source: plugin)")
         if self.mode == "mock" and self.gripper.feedback_source != "mock":

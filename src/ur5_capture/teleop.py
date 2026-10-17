@@ -9,8 +9,8 @@ import numpy as np
 class MouseSample:
     axes: np.ndarray
     enabled: bool
-    stop: bool
     grasp: int  # commanded grasp: 0=open, 1=closed; never implied hardware feedback
+    high_speed: bool = False
 
 
 class SpaceMouseInput:
@@ -19,6 +19,8 @@ class SpaceMouseInput:
         self.grasp = int(gripper_cfg.initial_grasp) if gripper_cfg is not None else 0
         self.gripper_button = gripper_cfg.toggle_button if gripper_cfg is not None else None
         self.gripper_button_was_down = False
+        self.speed_button_was_down = False
+        self.high_speed = False
         self.device = None
         self.last_event = None
         self.last_event_host = 0.0
@@ -43,16 +45,13 @@ class SpaceMouseInput:
             if self.step % 10 == 0:
                 self.toggle_grasp()
             return MouseSample(np.array([0.4 * np.sin(self.step / 30), 0, 0, 0, 0, 0.15]),
-                               True, False, self.grasp)
+                               True, self.grasp, self.high_speed)
         # Each read consumes one HID report; drain queued reports before using the axes.
         # Snapshot t before the next read because the driver mutates a shared state object.
         state = self.device.read()
-        stop_seen = False
         for _ in range(128):
             if state is None:
                 break
-            if self.cfg.stop_button < len(state.buttons):
-                stop_seen |= bool(state.buttons[self.cfg.stop_button])
             if self.gripper_button is not None:
                 if self.gripper_button >= len(state.buttons):
                     raise ValueError("Configured gripper button is unavailable on this SpaceMouse")
@@ -60,6 +59,12 @@ class SpaceMouseInput:
                 if down and not self.gripper_button_was_down:
                     self.toggle_grasp()
                 self.gripper_button_was_down = down
+            if self.cfg.speed_toggle_button >= len(state.buttons):
+                raise ValueError("Configured speed button is unavailable on this SpaceMouse")
+            speed_down = bool(state.buttons[self.cfg.speed_toggle_button])
+            if speed_down and not self.speed_button_was_down:
+                self.high_speed = not self.high_speed
+            self.speed_button_was_down = speed_down
             previous_t = state.t
             state = self.device.read()
             if state is None or state.t == previous_t:
@@ -72,19 +77,13 @@ class SpaceMouseInput:
         event_time = state.t
         if event_time != self.last_event:
             self.last_event, self.last_event_host = event_time, now
-        buttons = state.buttons
-        if max(self.cfg.deadman_button, self.cfg.stop_button) >= len(buttons):
-            raise ValueError("Configured SpaceMouse button index is unavailable")
-        stop = stop_seen or bool(buttons[self.cfg.stop_button])
-        held = bool(buttons[self.cfg.deadman_button])
         axes = np.array([state.x, state.y, state.z, state.roll, state.pitch, state.yaw], dtype=float)
         if not np.isfinite(axes).all():
             raise RuntimeError("Non-finite SpaceMouse input")
         if now - self.last_event_host > self.cfg.stale_timeout_s:
-            if held and np.any(np.abs(axes) > self.cfg.deadzone):
+            if np.any(np.abs(axes) > self.cfg.deadzone):
                 raise RuntimeError("SpaceMouse motion report is stale")
-            held = False
-        return MouseSample(axes, held, stop, self.grasp)
+        return MouseSample(axes, True, self.grasp, self.high_speed)
 
     def disconnect(self):
         if self.device is not None:

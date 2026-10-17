@@ -71,39 +71,59 @@ def record(cfg, unattended=False):
             if not unattended:
                 if input(f"Episode {kept + 1}: Enter starts; q quits > ").strip().lower() == "q":
                     break
-                print("Hold SpaceMouse deadman to move. g: toggle commanded grasp; s: end, d: discard, q: quit.")
+                print("Move SpaceMouse cap to move. Button 0 or g: toggle gripper; button 1: speed low/high.")
+                print("Terminal: s ends episode, d discards, q discards and quits. Use pendant E-stop for emergency stop.")
             attempted += 1
             decision = "s"
-            start = deadline = time.monotonic()
+            deadline = time.monotonic()
             frames = round(cfg.dataset.episode_seconds * cfg.dataset.fps)
+            # RealSense may spend several frames finishing USB/codec startup even
+            # after connect() succeeds. Establish the strict schedule only after
+            # this bounded warm-up, so startup latency cannot discard an episode.
+            warmup_frames = min(frames - 1, max(5, cfg.dataset.fps // 2))
             try:
                 with TerminalKeys() as keys:
                     for index in range(frames):
                         key = keys.read()
                         if key == "g":
-                            mouse.toggle_grasp()  # physical execution is gated below by deadman
+                            mouse.toggle_grasp()
                         if key in ("s", "d", "q"):
                             decision = key
                             break
-                        if time.monotonic() - deadline > cfg.synchronization.max_loop_lateness_s:
-                            raise RuntimeError("Recorder missed its timing deadline; episode discarded")
+                        lateness = time.monotonic() - deadline
+                        if index >= warmup_frames and lateness > cfg.synchronization.max_loop_lateness_s:
+                            raise RuntimeError(
+                                "Recorder missed its timing deadline; "
+                                f"frame={index} lateness={lateness:.3f}s; episode discarded"
+                            )
                         images = rig.read()
                         state = robot.get_state(cfg.synchronization.max_robot_age_s)
                         gripper_sample = robot.read_gripper_qpos()  # absolute feedback, BEFORE current action
                         sample = mouse.read()
-                        if sample.stop:
-                            raise RuntimeError("SpaceMouse stop button pressed")
-                        target, delta = target_from_axes(state.pose, sample.axes, cfg, sample.enabled)
+                        target, delta = target_from_axes(state.pose, sample.axes, cfg, sample.enabled,
+                                                         high_speed=sample.high_speed)
                         response = robot.send_target(target, 1 / cfg.dataset.fps, sample.enabled)
                         robot.update_gripper_command(sample.grasp, enabled=sample.enabled)
                         frame = build_frame(cfg, state, images, target, delta, sample.grasp, sample.enabled,
                                             response["accepted_host_time"], gripper_sample)
                         writer.add(frame)
-                        deadline = start + (index + 1) / cfg.dataset.fps
+                        if index == warmup_frames - 1:
+                            # Discard startup delay from the schedule while keeping
+                            # all warm-up frames in the recorded episode.
+                            deadline = time.monotonic()
+                        else:
+                            deadline += 1 / cfg.dataset.fps
+                            now = time.monotonic()
+                            if deadline < now:
+                                # Rebase after a small overrun; otherwise several
+                                # sub-period overruns accumulate into a false miss.
+                                deadline = now
                         time.sleep(max(0, deadline - time.monotonic()))
             finally:
                 # Stop before episode encoding or any blocking input prompt.
                 robot.stop()
+            if decision == "s" and writer.count >= 2:
+                print(f"Episode time limit reached ({cfg.dataset.episode_seconds:g}s).")
             if writer.count < 2:
                 decision = "d" if decision != "q" else "q"
             if decision == "s" and not unattended:

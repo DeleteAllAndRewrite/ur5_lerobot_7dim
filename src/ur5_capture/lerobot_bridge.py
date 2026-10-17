@@ -100,7 +100,7 @@ class UR5Robot(UR5Backend, Robot):
 
     def send_action(self, action):
         if set(action) != set(self.action_features):
-            raise ValueError("send_action expects 6D TCP delta, grasp command, and deadman enabled")
+            raise ValueError("send_action expects 6D TCP delta, grasp command, and enabled flag")
         state = self.get_state(self.capture_config.synchronization.max_robot_age_s)
         delta = np.array([action[n] for n in DELTA_NAMES], dtype=float)
         grasp = float(action["grasp"])
@@ -110,8 +110,8 @@ class UR5Robot(UR5Backend, Robot):
         period = 1 / self.capture_config.dataset.fps
         if not enabled:
             delta[:] = 0
-        delta[:3] = limit_norm(delta[:3], self.cfg.max_translation_speed * period)
-        delta[3:] = limit_norm(delta[3:], self.cfg.max_rotation_speed * period)
+        delta[:3] = limit_norm(delta[:3], self.cfg.high_translation_speed * period)
+        delta[3:] = limit_norm(delta[3:], self.cfg.high_rotation_speed * period)
         target = compose(state.pose, delta, self.capture_config.teleop.frame)
         target[:3] = np.clip(target[:3], self.cfg.workspace_min, self.cfg.workspace_max)
         try:
@@ -179,17 +179,19 @@ class SpaceMouseTeleoperator(SpaceMouseInput, Teleoperator):
 
     def get_action(self):
         sample = self.read()
-        if sample.stop:
-            raise RuntimeError("SpaceMouse stop button pressed")
         dz = self.cfg.deadzone
         axes = np.clip(np.sign(sample.axes) * np.maximum(np.abs(sample.axes) - dz, 0) / (1 - dz), -1, 1)
         if not sample.enabled:
             axes[:] = 0
         period = 1 / self.capture_config.dataset.fps
+        translation_speed = (self.capture_config.robot.high_translation_speed if sample.high_speed
+                             else self.capture_config.robot.max_translation_speed)
+        rotation_speed = (self.capture_config.robot.high_rotation_speed if sample.high_speed
+                          else self.capture_config.robot.max_rotation_speed)
         translation = axes[list(self.cfg.translation_axes)] * self.cfg.translation_signs
         rotation = axes[list(self.cfg.rotation_axes)] * self.cfg.rotation_signs
-        delta = np.r_[limit_norm(translation, 1) * self.capture_config.robot.max_translation_speed * period,
-                      limit_norm(rotation, 1) * self.capture_config.robot.max_rotation_speed * period]
+        delta = np.r_[limit_norm(translation, 1) * translation_speed * period,
+                      limit_norm(rotation, 1) * rotation_speed * period]
         return {**{n: float(v) for n, v in zip(DELTA_NAMES, delta, strict=True)},
                 "grasp": float(sample.grasp), "enabled": float(sample.enabled)}
 

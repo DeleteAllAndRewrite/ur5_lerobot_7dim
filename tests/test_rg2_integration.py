@@ -50,7 +50,7 @@ def bridge(monkeypatch):
     return module
 
 
-def test_bridge_forwards_deadman_and_stops_after_gripper_failure(bridge, monkeypatch):
+def test_bridge_forwards_enabled_state_and_stops_after_gripper_failure(bridge, monkeypatch):
     cfg = load_config("configs/mock.yaml")
     robot = bridge.UR5Robot(bridge.UR5RobotConfig(), cfg)
     calls = []
@@ -133,7 +133,7 @@ def test_recorder_samples_before_command_and_stops_before_save(bridge, monkeypat
     def read(self):
         from ur5_capture.teleop import MouseSample
         self.toggle_grasp()
-        return MouseSample(np.zeros(6), True, False, self.grasp)
+        return MouseSample(np.zeros(6), True, self.grasp)
     monkeypatch.setattr(bridge.SpaceMouseTeleoperator, "read", read)
     result = recorder.record(cfg, unattended=True)
     assert result["saved_episodes"] == 1

@@ -13,7 +13,7 @@
 | RobotConfig | UR5RobotConfig | 官方 dataclass 注册；引用主 YAML |
 | Robot | UR5Robot | 继承官方基类，提供观测/动作/连接接口及时间戳扩展 |
 | TeleoperatorConfig | SpaceMouseTeleoperatorConfig | 官方 dataclass 注册 |
-| Teleoperator | SpaceMouseTeleoperator | 继承官方基类，提供增量动作及 deadman |
+| Teleoperator | SpaceMouseTeleoperator | 继承官方基类，提供增量动作、夹爪切换键与速度档切换键 |
 | Camera | CameraRig / CameraStream | 使用 RealSense SDK 的独立时间戳采集封装，不冒充官方 Camera 子类 |
 | Dataset | 官方 LeRobotDataset | create / add_frame / save_episode / finalize |
 | Record script | ur5-capture | 管理时序、命令确认和 episode 生命周期 |
@@ -42,7 +42,7 @@ p_t^*=p_t+R_t\Delta p_t^{tool},\qquad R_t^*=R_t\exp([\Delta r_t^{tool}]_\times).
 a_t=\left[p_t^*-p_t,\ \operatorname{Log}(R_t^*R_t^\top)^\vee,\ g_t\right],\quad g_t\in\{0,1\}.
 \]
 
-其中 $g_t$ 表示锁存的目标 `grasp`（0 张开、1 闭合），非实测夹爪状态，也不会在未接入驱动时执行实体夹爪动作。`action` 为 float32[7]；`observation.state` 为 float32[8]，包括绝对 TCP 位姿(6D)与夹爪左右手指绝对关节位置(2D)。夹爪位置来源于单独的硬件反馈（或明确标注的 mock 模拟），不能使用 grasp 命令伪造。运动使能 `enabled` 仍作为与动作分离的安全控制量传给控制进程并作为 `complementary_info.deadman` 保存。
+其中 $g_t$ 表示锁存的目标 `grasp`（0 张开、1 闭合），非实测夹爪状态，也不会在未接入驱动时执行实体夹爪动作。`action` 为 float32[7]；`observation.state` 为 float32[8]，包括绝对 TCP 位姿(6D)与夹爪左右手指绝对关节位置(2D)。夹爪位置来源于单独的硬件反馈（或明确标注的 mock 模拟），不能使用 grasp 命令伪造。`enabled` 作为与动作分离的控制量传给控制进程并作为 `complementary_info.motion_enabled` 保存；SpaceMouse 不使用 deadman 按键。
 
 因此不会对两个轴角向量做直接差分，也不会将相机坐标、工具坐标与 base 坐标混用。±π 附近的旋转差分包含专门测试。
 
@@ -53,14 +53,14 @@ UR5/CB3 默认控制进程 125 Hz，数据保存 30 Hz；二者不要求整除�
 采集主循环的顺序：
 
 1. 从三个相机历史缓冲区中选择尚未使用的、主机时间相近的 RGB 帧。
-2. 获取 RTDE 进程最近状态并检查新鲜度。
-3. 读取独立夹爪反馈（左右指绝对关节位置），然后读取并排空 SpaceMouse HID 报文队列，检查 stop / deadman / 事件新鲜度；可选第三按键的按下沿或终端 `g` 切换目标 `grasp`。
-4. 基于该观测计算目标，提交给 RTDE 进程，等待接收确认。
+2. 获取运动进程最近状态并检查新鲜度（实机使用 UR RTDE）。
+3. 读取独立夹爪反馈（左右指绝对关节位置），然后读取并排空 SpaceMouse HID 报文队列，检查事件新鲜度；按键 0 的按下沿或终端 `g` 切换目标 `grasp`，按键 1 的按下沿切换速度档。
+4. 基于该观测计算目标，提交给运动进程，等待接收确认。
 5. 把 8D 绝对观测、7D 动作（6D 目标增量 + `grasp` 指令状态）、目标和诊断时间戳加入官方写入器。
 
 每帧的记录时间是名义网格时间。实际相机到达、状态采样、命令接收与数据组装时间分别记录，不把后采样的状态冒充动作前观测。相机最晚数据与机器人状态之间仍存在采样偏差，本实现不对位姿做时间插值。
 
-主进程通过 Pipe 提交控制命令，控制进程通过共享数组提供状态。Pipe 每次命令必须确认，没有无限排队或默默丢弃控制命令。主进程写 PNG、编码、保存文件时，控制进程独立运行；主进程长时间无新命令则触发命令超时。机器人端另启用 RTDE watchdog，处理 Python 控制进程停止更新的情形。
+主进程通过 Pipe 提交控制命令，控制进程通过共享数组提供状态。Pipe 每次命令必须确认，没有无限排队或默默丢弃控制命令。主进程写 PNG、编码、保存文件时，控制进程独立运行；主进程长时间无新命令则触发命令超时。实机控制启用 RTDE watchdog。
 
 非硬实时操作系统、网络抖动、SDK 内部阻塞仍可能影响控制。对于更高速度或严格确定性需求，应进一步改为实时调度或专用控制进程，并完成真实控制器的 watchdog 与 stop 验证。
 
@@ -88,7 +88,7 @@ v2.1 通常按 episode 组织数据与视频，v3 将多 episode 聚合到文件
 
 | 需求 | 扩展点 |
 |---|---|
-| 实体夹爪 | 已支持 RG2 + Compute Box 的 Modbus TCP 测量/执行驱动，110 mm 上限；按 deadman 与执行配置门控。RG2 等效两指位置由实测总开度派生，详见 `RG2.md`。其他型号使用兼容插件 |
+| 实体夹爪 | 已支持 RG2 + UR5 RTDE 寄存器驱动，110 mm 上限；按执行配置门控。RG2 等效两指位置由 RTDE 状态派生，详见 `RG2.md`。其他型号使用兼容插件 |
 | RGB-D | 深度需要独立无损存储、单位和标定，不能写成普通有损 RGB MP4 |
 | 双臂 | 扩展 config、每臂控制进程和统一时钟；修改状态/动作维度及相机所属关系 |
 | 四元数状态 | 在记录边界转换，明确 xyzw/wxyz；动作旋转仍用 SO(3) 增量 |

@@ -41,7 +41,7 @@ def test_tool_translation_and_rotation_are_composed():
     np.testing.assert_allclose(difference(pose, target)[3:], [0, 0.03, 0], atol=1e-10)
 
 
-def test_deadman_and_workspace_clipping(config):
+def test_disabled_motion_and_workspace_clipping(config):
     pose = np.array(config.robot.mock_initial_pose)
     target, delta = target_from_axes(pose, np.ones(6), config, False)
     np.testing.assert_allclose(delta, 0, atol=1e-10)
@@ -57,12 +57,24 @@ def test_vector_speed_limit(config):
     assert np.linalg.norm(delta[3:]) <= config.robot.max_rotation_speed / config.dataset.fps + 1e-10
 
 
+def test_high_speed_profile_uses_configured_limits(config):
+    pose = np.array(config.robot.mock_initial_pose)
+    _, low = target_from_axes(pose, np.ones(6), config, True)
+    _, high = target_from_axes(pose, np.ones(6), config, True, high_speed=True)
+    assert np.isclose(np.linalg.norm(low[:3]), config.robot.max_translation_speed / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(high[:3]), config.robot.high_translation_speed / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(low[3:]), config.robot.max_rotation_speed / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(high[3:]), config.robot.high_rotation_speed / config.dataset.fps)
+
+
 @pytest.mark.parametrize("mutation", [
     lambda c: c.update(typo=1),
     lambda c: c['cameras'][1].update(serial=c['cameras'][0]['serial']),
     lambda c: c['cameras'][2].update(role='global'),
     lambda c: c['robot'].update(control_hz=500),
-    lambda c: c['teleop'].update(deadman_button=1),
+    lambda c: c['robot'].update(high_translation_speed=0.41),
+    lambda c: c['robot'].update(high_translation_speed=0.04),
+    lambda c: c['teleop'].update(speed_toggle_button=-1),
     lambda c: c['teleop'].update(rotation_axes=[0, 1, 2]),
     lambda c: c['robot'].update(max_translation_speed=float('nan')),
     lambda c: c['cameras'][0].update(fps=15),
@@ -168,12 +180,9 @@ def test_keyboard_toggle_and_mock_grasp_state(config):
     assert mouse.read().grasp == 1  # mock automatically toggles every tenth sample
 
 
-def test_gripper_button_must_not_override_motion_safety(config):
+def test_gripper_and_speed_buttons_must_differ(config):
     data = config.model_dump()
-    data['gripper']['toggle_button'] = data['teleop']['stop_button']
-    with pytest.raises(ValueError):
-        CaptureConfig.model_validate(data)
-    data['gripper']['toggle_button'] = data['teleop']['deadman_button']
+    data['gripper']['toggle_button'] = data['teleop']['speed_toggle_button']
     with pytest.raises(ValueError):
         CaptureConfig.model_validate(data)
 
@@ -203,6 +212,43 @@ def test_repeated_grasp_button_reports_only_toggle_once(config):
     assert mouse.read().grasp == 1  # no repeated toggles on held key
     mouse.device.events = [HIDState(3, False), HIDState(4, True)]
     assert mouse.read().grasp == 0  # rising edge again
+
+
+def test_button_zero_toggles_gripper_and_button_one_toggles_speed(config):
+    class HIDState:
+        def __init__(self, seq, button0=False, button1=False):
+            self.t = float(seq)
+            self.buttons = [button0, button1]
+            self.x = self.y = self.z = self.roll = self.pitch = self.yaw = 0.0
+
+    class FakeDevice:
+        def __init__(self):
+            self.events = []
+            self.latest = HIDState(0)
+
+        def read(self):
+            if self.events:
+                self.latest = self.events.pop(0)
+            return self.latest
+
+    config.gripper.toggle_button = 0
+    config.teleop.speed_toggle_button = 1
+    mouse = SpaceMouseInput(config.teleop, gripper_cfg=config.gripper)
+    mouse.device = FakeDevice()
+
+    mouse.device.events = [HIDState(1, button0=True)]
+    sample = mouse.read()
+    assert sample.grasp == 1 and sample.enabled and not sample.high_speed
+    mouse.device.events = [HIDState(2, button0=True)]
+    assert mouse.read().grasp == 1  # held key does not retrigger
+
+    mouse.device.events = [HIDState(3), HIDState(4, button1=True)]
+    sample = mouse.read()
+    assert sample.high_speed
+    mouse.device.events = [HIDState(5, button1=True)]
+    assert mouse.read().high_speed  # held key does not toggle back
+    mouse.device.events = [HIDState(6), HIDState(7, button1=True)]
+    assert not mouse.read().high_speed
 
 
 def test_mock_stale_robot_sample_waits_for_a_fresh_update(config, monkeypatch):

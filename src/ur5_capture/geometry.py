@@ -36,7 +36,7 @@ def interpolate(start, end, fraction):
     return compose(start, difference(start, end) * np.clip(fraction, 0, 1))
 
 
-def target_from_axes(pose, axes, cfg, enabled):
+def target_from_axes(pose, axes, cfg, enabled=True, high_speed=False):
     axes = vector(axes)
     dz = cfg.teleop.deadzone
     axes = np.sign(axes) * np.maximum(np.abs(axes) - dz, 0) / (1 - dz)
@@ -44,8 +44,10 @@ def target_from_axes(pose, axes, cfg, enabled):
     dt = 1 / cfg.dataset.fps
     linear = axes[list(cfg.teleop.translation_axes)] * cfg.teleop.translation_signs
     angular = axes[list(cfg.teleop.rotation_axes)] * cfg.teleop.rotation_signs
-    delta = np.r_[limit_norm(linear, 1) * cfg.robot.max_translation_speed * dt,
-                  limit_norm(angular, 1) * cfg.robot.max_rotation_speed * dt]
+    translation_speed = cfg.robot.high_translation_speed if high_speed else cfg.robot.max_translation_speed
+    rotation_speed = cfg.robot.high_rotation_speed if high_speed else cfg.robot.max_rotation_speed
+    delta = np.r_[limit_norm(linear, 1) * translation_speed * dt,
+                  limit_norm(angular, 1) * rotation_speed * dt]
     target = compose(pose, delta, cfg.teleop.frame)
     target[:3] = np.clip(target[:3], cfg.robot.workspace_min, cfg.robot.workspace_max)
     return target, difference(pose, target)
@@ -54,9 +56,19 @@ def target_from_axes(pose, axes, cfg, enabled):
 def check_target(actual, target, cfg):
     actual, target = vector(actual), vector(target)
     if np.any(target[:3] < cfg.workspace_min) or np.any(target[:3] > cfg.workspace_max):
-        raise RuntimeError("TCP outside configured workspace")
+        raise RuntimeError(
+            "TCP outside configured workspace: "
+            f"target={target[:3].tolist()} bounds="
+            f"{list(cfg.workspace_min)}..{list(cfg.workspace_max)}"
+        )
     error = difference(actual, target)
     if np.linalg.norm(error[:3]) > cfg.max_tracking_translation:
-        raise RuntimeError("TCP translation tracking limit exceeded")
+        raise RuntimeError(
+            "TCP translation tracking limit exceeded: "
+            f"actual={actual[:3].tolist()} target={target[:3].tolist()}"
+        )
     if np.linalg.norm(error[3:]) > cfg.max_tracking_rotation:
-        raise RuntimeError("TCP rotation tracking limit exceeded")
+        raise RuntimeError(
+            "TCP rotation tracking limit exceeded: "
+            f"actual={actual[3:].tolist()} target={target[3:].tolist()}"
+        )

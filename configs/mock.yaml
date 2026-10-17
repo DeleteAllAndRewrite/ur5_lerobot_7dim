@@ -25,6 +25,8 @@ robot:
   gain: 300
   max_translation_speed: 0.05
   max_rotation_speed: 0.3
+  high_translation_speed: 0.15
+  high_rotation_speed: 0.8
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
@@ -65,12 +67,11 @@ teleop:
   - 1
   - 1
   frame: base
-  deadman_button: 0
-  stop_button: 1
+  speed_toggle_button: 1
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0  # 0=open, 1=closed (command only)
-  toggle_button: null  # mock toggles every 10 samples
+  toggle_button: 0  # mock toggles every 10 samples
   feedback_source: mock  # 8D state[6:8] is SYNTHETIC, never real feedback
   mock_open_width_m: 0.08  # [left,right] = [+width/2,-width/2] in mock
 cameras:
