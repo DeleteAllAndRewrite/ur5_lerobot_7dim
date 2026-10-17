@@ -31,6 +31,7 @@ def test_real_capture_rejects_mock_finger_feedback():
     cfg = yaml.safe_load((ROOT / "configs/ur5_three_rgb.yaml").read_text())
     cfg['gripper']['feedback_source'] = 'mock'
     cfg['gripper']['feedback_plugin'] = None
+    cfg['gripper']['actuation_enabled'] = False
     with pytest.raises(ValueError, match='measured gripper feedback'):
         CaptureConfig.model_validate(cfg)
 
@@ -54,6 +55,7 @@ def test_feedback_plugin_reads_measured_joint_positions(monkeypatch):
     module.Sensor = Sensor
     monkeypatch.setitem(sys.modules, 'fake_gripper_sensor', module)
     cfg = CaptureConfig.model_validate(yaml.safe_load((ROOT / 'configs/ur5_three_rgb.yaml').read_text()))
+    cfg.gripper.actuation_enabled = False
     cfg.gripper.feedback_plugin = 'fake_gripper_sensor:Sensor'
     cfg.gripper.feedback_kwargs = {}
     reader = GripperFeedback(cfg.gripper)
@@ -73,6 +75,7 @@ def test_invalid_feedback_rejected(monkeypatch):
     module.Sensor = Sensor
     monkeypatch.setitem(sys.modules, 'bad_gripper_sensor', module)
     cfg = CaptureConfig.model_validate(yaml.safe_load((ROOT / 'configs/ur5_three_rgb.yaml').read_text()))
+    cfg.gripper.actuation_enabled = False
     cfg.gripper.feedback_plugin = 'bad_gripper_sensor:Sensor'
     cfg.gripper.feedback_kwargs = {}
     reader = GripperFeedback(cfg.gripper)

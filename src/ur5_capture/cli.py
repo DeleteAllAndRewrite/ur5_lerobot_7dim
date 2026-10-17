@@ -19,7 +19,13 @@ def main():
         import pyspacemouse
         for device in rs.context().query_devices():
             print("RealSense:", device.get_info(rs.camera_info.name), device.get_info(rs.camera_info.serial_number))
-        print("SpaceMouse:", pyspacemouse.get_connected_devices())
+        try:
+            devices = pyspacemouse.get_connected_devices()
+        except RuntimeError as exc:
+            parser.exit(1, f"SpaceMouse discovery failed: {exc}\n"
+                        "On Debian/Ubuntu, install the native HID backend: "
+                        "sudo apt-get install libhidapi-hidraw0\n")
+        print("SpaceMouse:", devices)
         return
     cfg = load_config(args.config)
     if args.command == "validate":
