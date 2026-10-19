@@ -6,6 +6,10 @@ import numpy as np
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+# EEF speed (vector norm) at full SpaceMouse deflection when a speed ratio is 1.0.
+MAX_TRANSLATION_SPEED = 0.4  # m/s
+MAX_ROTATION_SPEED = 1.0  # rad/s
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -35,10 +39,6 @@ class RobotConfig(StrictModel):
     tcp_configured: bool = False
     lookahead_time: float = Field(0.1, ge=0.03, le=0.2)
     gain: int = Field(300, ge=100, le=2000)
-    max_translation_speed: float = Field(0.05, gt=0, le=0.25)
-    max_rotation_speed: float = Field(0.3, gt=0, le=1)
-    high_translation_speed: float = Field(0.15, gt=0, le=0.4)
-    high_rotation_speed: float = Field(0.8, gt=0, le=1)
     max_tracking_translation: float = Field(0.03, gt=0)
     max_tracking_rotation: float = Field(0.2, gt=0)
     command_timeout_s: float = Field(0.15, gt=0, le=0.5)
@@ -58,7 +58,14 @@ class TeleopConfig(StrictModel):
     rotation_signs: tuple[Literal[-1, 1], Literal[-1, 1], Literal[-1, 1]] = (1, 1, 1)
     frame: Literal["base", "tool"] = "base"
     speed_toggle_button: int = Field(1, ge=0)
+    low_speed_ratio: float = Field(0.125, gt=0, le=2)
+    high_speed_ratio: float = Field(0.375, gt=0, le=2)
     stale_timeout_s: float = Field(0.15, gt=0, le=0.5)
+
+    def speed_limits(self, high_speed=False):
+        """Return (m/s, rad/s) for full deflection in the active speed level."""
+        ratio = self.high_speed_ratio if high_speed else self.low_speed_ratio
+        return ratio * MAX_TRANSLATION_SPEED, ratio * MAX_ROTATION_SPEED
 
 
 class GripperConfig(StrictModel):
@@ -136,10 +143,8 @@ class CaptureConfig(StrictModel):
             raise ValueError("command timeout must exceed one recording period")
         if np.any(np.array(r.workspace_min) >= r.workspace_max):
             raise ValueError("workspace_min must be below workspace_max")
-        if r.high_translation_speed < r.max_translation_speed:
-            raise ValueError("high_translation_speed must be >= max_translation_speed")
-        if r.high_rotation_speed < r.max_rotation_speed:
-            raise ValueError("high_rotation_speed must be >= max_rotation_speed")
+        if t.high_speed_ratio < t.low_speed_ratio:
+            raise ValueError("high_speed_ratio must be >= low_speed_ratio")
         if sorted(t.translation_axes + t.rotation_axes) != list(range(6)):
             raise ValueError("Axis mapping must be a permutation of 0..5")
         if self.gripper.toggle_button == t.speed_toggle_button:

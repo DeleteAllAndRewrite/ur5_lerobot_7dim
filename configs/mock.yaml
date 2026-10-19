@@ -23,10 +23,6 @@ robot:
   tcp_configured: false
   lookahead_time: 0.1
   gain: 300
-  max_translation_speed: 0.05
-  max_rotation_speed: 0.3
-  high_translation_speed: 0.15
-  high_rotation_speed: 0.8
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
@@ -68,6 +64,8 @@ teleop:
   - 1
   frame: base
   speed_toggle_button: 1
+  low_speed_ratio: 0.125
+  high_speed_ratio: 0.375
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0  # 0=open, 1=closed (command only)

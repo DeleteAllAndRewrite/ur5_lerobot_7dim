@@ -26,3 +26,15 @@ def test_windows_special_keys_and_ctrl_c(monkeypatch):
         assert keys.read() == ""
         with pytest.raises(KeyboardInterrupt):
             keys.read()
+
+
+def test_next_dataset_root_numbers_from_0000(tmp_path):
+    from ur5_capture.record import next_dataset_root
+    base = tmp_path / "ur5_three_rgb"
+    assert next_dataset_root(str(base)) == tmp_path / "ur5_three_rgb_0000"
+    base.mkdir()  # legacy unnumbered dataset is ignored and kept
+    (tmp_path / "ur5_three_rgb_0000").mkdir()
+    (tmp_path / "ur5_three_rgb_0007").mkdir()
+    (tmp_path / "ur5_three_rgb_backup").mkdir()
+    (tmp_path / "ur5_three_rgb_extra_0009").mkdir()
+    assert next_dataset_root(str(base)) == tmp_path / "ur5_three_rgb_0008"

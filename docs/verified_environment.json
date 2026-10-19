@@ -1,15 +1,19 @@
 {
-  "lerobot": "0.4.4",
-  "torch": "2.7.1+cpu",
-  "torchvision": "0.22.1+cpu",
+  "lerobot": "0.6.2",
+  "torch": "2.7.1",
+  "torchvision": "0.22.1",
   "datasets": "4.8.5",
   "numpy": "2.2.6",
-  "scipy": "1.17.0",
-  "pandas": "2.2.3",
+  "scipy": "1.18.1",
+  "pandas": "2.3.3",
   "pyarrow": "26.0.0",
   "av": "15.1.0",
-  "pydantic": "2.13.5",
+  "pydantic": "2.14.1",
   "pyspacemouse": "2.0.0",
   "ur-rtde": "1.6.5",
-  "pyrealsense2": "2.56.5.9235"
+  "pyrealsense2": "2.56.5.9235",
+  "rerun-sdk": "0.33.1",
+  "huggingface-hub": "1.33.0",
+  "draccus": "0.11.6",
+  "cmake": "4.1.3"
 }

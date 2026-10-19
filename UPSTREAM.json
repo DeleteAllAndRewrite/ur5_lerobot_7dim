@@ -1,9 +1,10 @@
 {
   "v3": {
-    "tag": "v0.4.4",
-    "commit": "8fff0fde7c79f23a93d845d1a50e985de01f8b8a",
+    "version": "0.6.2",
+    "commit": "326484d77d2ac90379e84222dfad21fe4acf1f71",
     "dataset_version": "v3.0",
-    "directory": "lerobot"
+    "directory": "lerobot",
+    "source": "git submodule, integrated from /home/sumi/lerobot-rerun"
   },
   "v21": {
     "tag": "v0.3.3",
@@ -12,6 +13,6 @@
     "directory": "compat/lerobot_v21"
   },
   "upstream": "https://github.com/huggingface/lerobot",
-  "snapshot": "Full src plus install metadata; no .git, media, docs, upstream tests or examples",
+  "snapshot": "v3 is a pinned Git submodule; v21 retains the original source snapshot",
   "upstream_modified": false
 }

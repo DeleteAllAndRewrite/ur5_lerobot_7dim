@@ -17,7 +17,9 @@ def test_three_rgb_two_episodes_v3(tmp_path):
     cfg.synchronization.max_loop_lateness_s = 0.3
     result = record(cfg, unattended=True)
     assert result['saved_episodes'] == 2
-    ds = LeRobotDataset(cfg.dataset.repo_id, root=cfg.dataset.root, video_backend='pyav')
+    assert result['root'] == str(tmp_path / 'data_0000')
+    assert cfg.dataset.root == str(tmp_path / 'data')
+    ds = LeRobotDataset(cfg.dataset.repo_id, root=result['root'], video_backend='pyav')
     assert len(ds) == 12
     assert ds.meta.info['codebase_version'] == 'v3.0'
     for i in [0, 5, 6, 11]:
@@ -42,3 +44,11 @@ def test_three_rgb_two_episodes_v3(tmp_path):
         frame_numbers = np.array([raw[i]['complementary_info.camera_frame_numbers']
                                   for i in range(episode * 6, (episode + 1) * 6)])
         assert np.all(np.diff(frame_numbers, axis=0) > 0)
+
+    original_info = (Path(result['root']) / 'meta/info.json').read_bytes()
+    second = record(cfg, unattended=True)
+    assert second['root'] == str(tmp_path / 'data_0001')
+    assert second['saved_episodes'] == 2
+    second_ds = LeRobotDataset(cfg.dataset.repo_id, root=second['root'], video_backend='pyav')
+    assert len(second_ds) == 12
+    assert (Path(result['root']) / 'meta/info.json').read_bytes() == original_info

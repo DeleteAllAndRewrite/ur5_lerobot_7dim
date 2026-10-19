@@ -1,3 +1,9 @@
 -r common.txt
+# LeRobot 0.6.2 (pinned source in lerobot/) and local Rerun replay.
+huggingface-hub==1.33.0
+draccus==0.11.6
+cmake>=3.29.0.1,<4.2.0
+setuptools>=71,<82
 datasets==4.8.5
 gymnasium==1.4.0
+-r replay.txt

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ur5-lerobot-capture"
 version = "0.1.0"
 description = "Config-driven UR5/SpaceMouse/three-view RGB capture for LeRobot v3"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.24,<3",
     "scipy>=1.10,<2",
@@ -16,12 +16,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+replay = ["rerun-sdk==0.33.1"]
 hardware = ["ur-rtde>=1.6,<2", "pyspacemouse==2.0.0", "pyrealsense2>=2.55,<2.57; sys_platform == 'linux'"]
 test = ["pytest>=8,<9", "ruff>=0.9"]
 
 [project.scripts]
 ur5-capture = "ur5_capture.cli:main"
 ur5-convert = "ur5_capture.convert:main"
+ur5-replay = "ur5_capture.replay:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

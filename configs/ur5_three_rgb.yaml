@@ -5,7 +5,7 @@ dataset:
   root: datasets/ur5_three_rgb
   fps: 30
   task: Pick up the object and place it in the target area
-  episodes: 10
+  episodes: 100
   episode_seconds: 300.0
   image_writer_threads: 6
   vcodec: h264
@@ -24,19 +24,14 @@ robot:
   # servol控制参数
   lookahead_time: 0.1
   gain: 300
-  # spacemouse -> eef运动映射
-  max_translation_speed: 0.15 # vector norm, m/s
-  max_rotation_speed: 0.5     # vector norm, rad/s
-  high_translation_speed: 0.30 # button 1 toggles high/low
-  high_rotation_speed: 0.8
   # 安全保护
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
   # workspace
   watchdog_hz: 10.0
-  workspace_min: [-0.60, -0.60, 0.05]
-  workspace_max: [0.60, 0.60, 0.80]
+  workspace_min: [-1.00, -1.00, -0.50]
+  workspace_max: [1.00, 1.00, 0.80]
   workspace_configured: true # 真实使用Ture
   mock_initial_pose: [0.30, 0.0, 0.30, 0.0, 3.141592653589793, 0.0]
 teleop:
@@ -48,6 +43,10 @@ teleop:
   rotation_signs: [1, 1, 1]
   frame: base                # base or tool; saved action always expressed in base
   speed_toggle_button: 1     # press edge toggles low/high speed
+  # spacemouse满偏 -> eef速度 = 比例 × (0.4 m/s, 1.0 rad/s)
+  # 取值范围：0 < low_speed_ratio <= high_speed_ratio <= 2
+  low_speed_ratio: 0.75     # 低速档：0.30 m/s, 0.75 rad/s
+  high_speed_ratio: 2.00     # 高速档：0.40 m/s, 1.00 rad/s；设为 2 时为 0.80 m/s, 2.00 rad/s
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0           # 0=open (110 mm), 1=closed (0 mm); connect does not move

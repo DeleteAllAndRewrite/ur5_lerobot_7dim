@@ -28,7 +28,25 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
     - 左键同样控制夹爪开合
     - 右键切换高速档、低速挡
 
-如果需要更长 episode，修改 `dataset.episode_seconds`，例如改为 `120.0`。
+如果需要更长 episode，修改 `dataset.episode_seconds`，例如改为 `600.0`。
+
+# 视频与 action 同步回放（Rerun）
+
+```bash
+cd /home/sumi/ur5_lerobot_7dim
+conda activate ur5-lerobot-v3
+
+# 首次使用或更新环境后执行
+python -m pip install -r requirements/v3.txt
+python -m pip install -e ./lerobot --no-deps
+python -m pip install -e '.[replay]'
+
+# 在 Rerun 中同步查看三路视频、action 和 state
+ur5-replay --root datasets/ur5_three_rgb_0003 --episode-index 0
+```
+
+将 `--root` 替换为已保存的数据集目录；episode 编号从 0 开始。仅查看数据，无需启动机器人。
+导出文件、浏览器和远程回放方法见 [RERUN.md](RERUN.md)。
 
 
 

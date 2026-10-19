@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import RobotConfig
+from .config import MAX_TRANSLATION_SPEED, RobotConfig
 from .geometry import check_target, interpolate, vector
 
 
@@ -118,7 +118,7 @@ def _worker(config, mock, shared, connection, quit_event):
                 check_target(pose, target, cfg)
                 if control is not None:
                     command_pose = interpolate(start, target, (now - segment_start + 1 / cfg.control_hz) / duration)
-                    if not control.servoL(command_pose.tolist(), cfg.high_translation_speed,
+                    if not control.servoL(command_pose.tolist(), MAX_TRANSLATION_SPEED,
                                           0.1, 1 / cfg.control_hz, cfg.lookahead_time, cfg.gain):
                         raise RuntimeError("servoL failed")
             next_tick += 1 / cfg.control_hz

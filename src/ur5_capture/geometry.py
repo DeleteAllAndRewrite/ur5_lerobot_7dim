@@ -44,8 +44,7 @@ def target_from_axes(pose, axes, cfg, enabled=True, high_speed=False):
     dt = 1 / cfg.dataset.fps
     linear = axes[list(cfg.teleop.translation_axes)] * cfg.teleop.translation_signs
     angular = axes[list(cfg.teleop.rotation_axes)] * cfg.teleop.rotation_signs
-    translation_speed = cfg.robot.high_translation_speed if high_speed else cfg.robot.max_translation_speed
-    rotation_speed = cfg.robot.high_rotation_speed if high_speed else cfg.robot.max_rotation_speed
+    translation_speed, rotation_speed = cfg.teleop.speed_limits(high_speed)
     delta = np.r_[limit_norm(linear, 1) * translation_speed * dt,
                   limit_norm(angular, 1) * rotation_speed * dt]
     target = compose(pose, delta, cfg.teleop.frame)

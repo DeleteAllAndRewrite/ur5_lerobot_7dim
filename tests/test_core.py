@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 import yaml
 
 from ur5_capture.cameras import CameraFrame, select_frames
-from ur5_capture.config import CaptureConfig, SyncConfig
+from ur5_capture.config import MAX_ROTATION_SPEED, MAX_TRANSLATION_SPEED, CaptureConfig, SyncConfig
 from ur5_capture.geometry import check_target, compose, difference, target_from_axes
 from ur5_capture.robot import UR5Backend
 from ur5_capture.teleop import SpaceMouseInput
@@ -53,18 +53,23 @@ def test_disabled_motion_and_workspace_clipping(config):
 
 def test_vector_speed_limit(config):
     _, delta = target_from_axes(config.robot.mock_initial_pose, np.ones(6), config, True)
-    assert np.linalg.norm(delta[:3]) <= config.robot.max_translation_speed / config.dataset.fps + 1e-10
-    assert np.linalg.norm(delta[3:]) <= config.robot.max_rotation_speed / config.dataset.fps + 1e-10
+    linear, angular = config.teleop.speed_limits()
+    assert np.linalg.norm(delta[:3]) <= linear / config.dataset.fps + 1e-10
+    assert np.linalg.norm(delta[3:]) <= angular / config.dataset.fps + 1e-10
 
 
-def test_high_speed_profile_uses_configured_limits(config):
+@pytest.mark.parametrize("low_ratio,high_ratio", [(0.25, 0.5), (1.5, 2.0), (2.0, 2.0)])
+def test_high_speed_profile_uses_configured_ratios(config, low_ratio, high_ratio):
     pose = np.array(config.robot.mock_initial_pose)
+    data = config.model_dump()
+    data['teleop'].update(low_speed_ratio=low_ratio, high_speed_ratio=high_ratio)
+    config = CaptureConfig.model_validate(data)
     _, low = target_from_axes(pose, np.ones(6), config, True)
     _, high = target_from_axes(pose, np.ones(6), config, True, high_speed=True)
-    assert np.isclose(np.linalg.norm(low[:3]), config.robot.max_translation_speed / config.dataset.fps)
-    assert np.isclose(np.linalg.norm(high[:3]), config.robot.high_translation_speed / config.dataset.fps)
-    assert np.isclose(np.linalg.norm(low[3:]), config.robot.max_rotation_speed / config.dataset.fps)
-    assert np.isclose(np.linalg.norm(high[3:]), config.robot.high_rotation_speed / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(low[:3]), low_ratio * MAX_TRANSLATION_SPEED / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(high[:3]), high_ratio * MAX_TRANSLATION_SPEED / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(low[3:]), low_ratio * MAX_ROTATION_SPEED / config.dataset.fps)
+    assert np.isclose(np.linalg.norm(high[3:]), high_ratio * MAX_ROTATION_SPEED / config.dataset.fps)
 
 
 @pytest.mark.parametrize("mutation", [
@@ -72,11 +77,14 @@ def test_high_speed_profile_uses_configured_limits(config):
     lambda c: c['cameras'][1].update(serial=c['cameras'][0]['serial']),
     lambda c: c['cameras'][2].update(role='global'),
     lambda c: c['robot'].update(control_hz=500),
-    lambda c: c['robot'].update(high_translation_speed=0.41),
-    lambda c: c['robot'].update(high_translation_speed=0.04),
+    lambda c: c['teleop'].update(high_speed_ratio=2.01),
+    lambda c: c['teleop'].update(low_speed_ratio=2.01, high_speed_ratio=2),
+    lambda c: c['teleop'].update(high_speed_ratio=0.1),
+    lambda c: c['teleop'].update(low_speed_ratio=0),
+    lambda c: c['robot'].update(max_translation_speed=0.15),  # removed absolute speed key
     lambda c: c['teleop'].update(speed_toggle_button=-1),
     lambda c: c['teleop'].update(rotation_axes=[0, 1, 2]),
-    lambda c: c['robot'].update(max_translation_speed=float('nan')),
+    lambda c: c['teleop'].update(low_speed_ratio=float('nan')),
     lambda c: c['cameras'][0].update(fps=15),
 ])
 def test_invalid_configs_rejected(config, mutation):

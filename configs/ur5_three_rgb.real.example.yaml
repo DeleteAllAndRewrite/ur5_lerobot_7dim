@@ -24,10 +24,6 @@ robot:
   tcp_configured: false       # <<< 必改：完成 TCP 标定后改 true
   lookahead_time: 0.1
   gain: 300
-  max_translation_speed: 0.15 # 低速档线速度上限 m/s
-  max_rotation_speed: 0.5     # 低速档角速度上限 rad/s
-  high_translation_speed: 0.30 # 按键 1 切换高速档
-  high_rotation_speed: 0.8
   max_tracking_translation: 0.03
   max_tracking_rotation: 0.2
   command_timeout_s: 0.15
@@ -45,6 +41,9 @@ teleop:
   rotation_signs: [1, 1, 1]
   frame: base                # base 或 tool
   speed_toggle_button: 1     # 按下沿切换低速/高速
+  # SpaceMouse 满偏 -> 末端速度 = 比例 × (0.4 m/s, 1.0 rad/s)
+  low_speed_ratio: 0.375     # 低速档：0.15 m/s, 0.375 rad/s
+  high_speed_ratio: 0.75     # 高速档：0.30 m/s, 0.75 rad/s
   stale_timeout_s: 0.15
 gripper:
   initial_grasp: 0           # 0=开至 110 mm，1=闭至 0 mm；连接时不执行

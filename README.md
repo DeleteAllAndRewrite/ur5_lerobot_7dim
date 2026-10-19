@@ -12,7 +12,7 @@
 
 **RG2 夹爪：** 当前实机链路使用 UR5 RTDE 寄存器读写，最大开合度 **110 mm**。`grasp=0` 目标张开，`grasp=1` 目标闭合；设置 `gripper.actuation_enabled: true` 后，目标切换时下发夹爪命令。SpaceMouse 按键 0 与终端 `g` 都会切换目标。RTDE worker 回报的目标总开度 `w` 派生为 `[w/2,-w/2]`（米）；该旧式工具 I/O 链路不提供独立编码器测量。参见 [RG2 接入说明](docs/RG2.md) 和 [反馈接口](docs/GRIPPER_FEEDBACK.md)。
 
-LeRobot v0.4.4 官方 writer 负责生成 v3.0；LeRobot v0.3.3 隔离环境负责 v2.1↔v3.0 格式转换。当前仅采 RGB、非 RGB-D；未做实物硬件验证。
+LeRobot 0.6.2 官方 writer 负责生成 v3.0；LeRobot v0.3.3 隔离环境负责 v2.1↔v3.0 格式转换。当前仅采 RGB、非 RGB-D；未做实物硬件验证。
 
 ## 1. 架构与目录
 
@@ -33,7 +33,7 @@ flowchart TD
 
 | 路径 | 职责 |
 |---|---|
-| `lerobot/` | 官方 LeRobot v0.4.4 源码快照；包含完整 src 与安装文件，不含媒体、示例和上游测试 |
+| `lerobot/` | 官方 LeRobot 0.6.2 Git 子模块；已整合外部 lerobot-rerun 的固定提交 |
 | `compat/lerobot_v21/` | 官方 v0.3.3 源码快照，供隔离转换环境使用 |
 | `configs/ur5_three_rgb.yaml` | 实机配置；使用 UR RTDE 和 RTDE 寄存器 RG2 |
 | `configs/mock.yaml` | 不依赖实物的三视角演示配置 |
@@ -45,20 +45,22 @@ flowchart TD
 | `src/ur5_capture/cameras.py` | 三台 RealSense 并行 RGB 读取、时间选择、重复帧检测 |
 | `src/ur5_capture/dataset.py` | 特征定义与官方 v3 写入器 |
 | `src/ur5_capture/record.py` | episode 开始、结束、保存、丢弃、异常清理 |
+| `src/ur5_capture/replay.py` | `ur5-replay` 本地数据集视频/action/state 同步可视化与 RRD 导出 |
 | `src/ur5_capture/convert.py` | 两个 Python 环境之间的双向转换调度 |
 | `src/ur5_capture/conversion_worker.py` | 官方读写器转换及逐帧校验 |
 | `tools/inspect_dataset.py` | 解码全部视频并检查动作定义和时间连续性 |
 | `docs/ARCHITECTURE.md` | 数据语义、时序和扩展边界 |
 | `docs/VALIDATION.md` | 已执行验证、结果与实机待验项 |
 | `docs/GRIPPER_FEEDBACK.md` | 真实夹爪关节位置采集接口和示例 |
+| `docs/RERUN.md` | Rerun 环境安装、桌面/浏览器回放和 RRD 导出 |
 
-**LeRobot 软件版本与数据版本不同。** 本项目固定 LeRobot **v0.4.4 → 数据 v3.0**，兼容环境固定 LeRobot **v0.3.3 → 数据 v2.1**。源码 commit 见 `UPSTREAM.json`。扩展代码位于独立包中，没有修改官方源码。
+**LeRobot 软件版本与数据版本不同。** 本项目固定 LeRobot **0.6.2 → 数据 v3.0**，兼容环境固定 LeRobot **v0.3.3 → 数据 v2.1**。源码 commit 见 `UPSTREAM.json`。扩展代码位于独立包中，没有修改官方源码。
 
 采集器调用官方基类的扩展接口以保留时间戳及控制命令确认；相机由 `CameraRig` 管理。当前入口为 `ur5-capture`，不是直接调用上游 `lerobot-record`。配置类型会在导入适配模块后注册，但没有修改上游 CLI 的设备发现和 processor 工厂。
 
 ## 2. 手动 Conda 环境安装（不使用一键安装脚本）
 
-在 **项目根目录** 下逐行执行。推荐 Python 3.11（包括 Apple Silicon 开发环境），使用 conda-forge 通道。请避免 `conda create -n xxx python= 3.12` 中 `=` 后面的空格。建议 Linux x86_64 + RealSense SDK + RTDE 用于实机；macOS 可用于离线开发，但 macOS 的 RealSense SDK/USB 兼容性不在已验范围内。首次下载依赖需要联网。
+在 **项目根目录** 下逐行执行。v3 采集与回放环境使用 Python 3.12（匹配当前 LeRobot），使用 conda-forge 通道。请避免 `conda create -n xxx python= 3.12` 中 `=` 后面的空格。建议 Linux x86_64 + RealSense SDK + RTDE 用于实机；macOS 可用于离线开发，但 macOS 的 RealSense SDK/USB 兼容性不在已验范围内。首次下载依赖需要联网。
 
 ### 2.1 v3 采集环境
 
@@ -74,6 +76,8 @@ python -m pip install -r requirements/v3.txt
 python -m pip install -e .
 
 # 3. 使用本项目内的官方 LeRobot 源码，不自动拉取新版 LeRobot
+git submodule update --init --recursive
+git -C lerobot checkout --detach 326484d77d2ac90379e84222dfad21fe4acf1f71
 python -m pip install -e ./lerobot --no-deps
 python -m pip install -e '.[test]'
 
@@ -90,15 +94,24 @@ Linux CPU-only 开发机如需避免 pip 默认获取 GPU 版 PyTorch，可以**
 python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**模拟采集和检查（已存在同名输出目录时会安全拒绝覆盖）：**
+**模拟采集和检查（每次运行自动创建带递增编号的新数据集目录）：**
 
 ```bash
 conda activate ur5-lerobot-v3
 ur5-capture record --config configs/mock.yaml --unattended
-python tools/inspect_dataset.py --root datasets/mock_three_rgb_8d
+python tools/inspect_dataset.py --root datasets/mock_three_rgb_8d_0000
 ```
 
-该 Conda 环境为采集和转换提供所需依赖，**不是**全部上游算法训练环境；上游全部训练、仿真等可选 extras 需要按上游文档单独安装。LeRobot 的 `--no-deps` 安装是为了避免覆盖本项目固定测试的依赖版本。
+该 Conda 环境为采集、转换和 Rerun 回放提供所需依赖，**不是**全部上游算法训练环境；上游全部训练、仿真等可选 extras 需要按上游文档单独安装。LeRobot 的 `--no-deps` 安装是为了避免覆盖本项目固定测试的依赖版本。
+
+**同步回放三路视频、action 和 state：**
+
+```bash
+ur5-replay --root datasets/ur5_three_rgb_0003 --episode-index 0
+```
+
+替换为实际保存的数据集目录。依赖已包含在 `requirements/v3.txt`；详细安装、导出 `.rrd`、
+浏览器及远程查看方法见 [Rerun 回放说明](docs/RERUN.md)。
 
 ### 2.2 v2.1 数据转换环境
 
@@ -154,14 +167,18 @@ RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySp
 | `gripper.initial_grasp` | 初始目标，0=张开，1=闭合；连接时不移动 |
 | `gripper.toggle_button` | SpaceMouse 夹爪切换键索引；当前配置为按键 0，终端 `g` 也可切换 |
 | `teleop.speed_toggle_button` | SpaceMouse 速度档切换键索引；当前配置为按键 1 |
-| `robot.max_translation_speed/max_rotation_speed` | 低速档线速度/角速度上限 |
-| `robot.high_translation_speed/high_rotation_speed` | 高速档线速度/角速度上限；按键 1 切换 |
+| `teleop.low_speed_ratio/high_speed_ratio` | 低速/高速档映射比例（0 < 低速 ≤ 高速 ≤ 2）；SpaceMouse 满偏时末端速度 = 比例 × 0.4 m/s（平移）及比例 × 1.0 rad/s（旋转），比例 2 对应 0.8 m/s、2.0 rad/s，按键 1 切换 |
 | `gripper.feedback_source` | 实机固定 `plugin`，模拟模式固定 `mock` |
 | `gripper.feedback_plugin` | RG2 使用 `ur5_capture.rg2:RTDEGripper`；其他型号可使用兼容插件 |
 | `gripper.feedback_kwargs` | RG2 填写 UR5 `robot_ip`、RTDE `port`、寄存器映射、开闭宽度和夹持力 |
 | `gripper.actuation_enabled` | 默认 false；启用后，夹爪目标切换时下发执行命令 |
 | `robot.motion_enabled` | 完成以上配置后设 true |
 | `dataset.root/task/episodes/episode_seconds` | 输出目录、任务描述及采集长度 |
+
+`dataset.root` 是目录名前缀。每次执行 `record` 都创建一个新数据集，例如
+`datasets/ur5_three_rgb_0000`、`datasets/ur5_three_rgb_0001`；编号从已有最大编号继续递增，
+旧的无编号目录也会保留。一次运行中的多个 episode 保存在同一个数据集中。
+启动时的 `Dataset output:` 和结束时返回的 `root` 均为本次实际保存路径。
 
 机械臂应已完成启动、制动器释放、工具负载设置，处于允许远程 RTDE 控制的状态；本项目不自动开机、解锁保护停机或执行回零。不同 UR5 控制器/PolyScope 版本的远程模式需按设备说明设置。
 
@@ -257,7 +274,8 @@ ur5-convert \
 ## 6. 官方参考
 
 - [LeRobotDataset v3 文档](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
-- [LeRobot v0.4.4 源码](https://github.com/huggingface/lerobot/tree/8fff0fde7c79f23a93d845d1a50e985de01f8b8a)
+- [当前 LeRobot 固定源码](https://github.com/huggingface/lerobot/tree/326484d77d2ac90379e84222dfad21fe4acf1f71)
+- [Rerun](https://github.com/rerun-io/rerun)
 - [LeRobot v0.3.3 源码](https://github.com/huggingface/lerobot/tree/b883328e6c95681ca90a18b102e4ae5e1f91e2bf)
 - [ur_rtde servoL 示例](https://sdurobotics.gitlab.io/ur_rtde/pages/examples/high_frequency_servoing/servol_example.html)
 - [PySpaceMouse](https://github.com/JakubAndrysek/PySpaceMouse)

@@ -1,3 +1,5 @@
 -r common.txt
+huggingface-hub==0.35.3
+draccus==0.10.0
 datasets==3.6.0
 gymnasium==0.29.1

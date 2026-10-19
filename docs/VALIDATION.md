@@ -1,4 +1,25 @@
-# 验证情况：8D state + 7D action + Conda 手动安装版本
+# 验证情况：采集、转换与 Rerun 回放
+
+## 2026-10-19：LeRobot + Rerun 整合
+
+- 将 `/home/sumi/lerobot-rerun` 的提交 `326484d77d2ac90379e84222dfad21fe4acf1f71`
+  整合到项目内 `lerobot/` 子模块，软件版本 0.6.2，数据格式仍为 v3.0。
+- 更新 v3 环境的 Hub、draccus、构建依赖与 Rerun SDK 0.33.1；v2.1 环境保留原 Hub/draccus 版本。
+- 依赖联合解析（`pip install --dry-run -r requirements/v3.txt -e . -e ./lerobot`）和
+  当前环境 `pip check` 通过。未另建全新 Conda 环境。
+- `python -m pytest tests -q`：**81 passed**，包括官方 Robot/Teleoperator 适配和模拟 v3 写入/读取。
+- 新命令 `ur5-replay --help`，以及路径不存在、空数据集、episode 越界、冲突参数的拒绝行为检查通过。
+- 浏览器模式使用本地数据集启动，HTTP 访问返回 200；检查后已停止服务。
+- `ur5-replay --root datasets/ur5_three_rgb_0003 --episode-index 0 --save` 正常完成：
+  1414 帧，导出 `replays/ur5_three_rgb_0003/local_ur5_three_rgb_episode_0.rrd`。
+  `rerun rrd verify` 通过；统计确认三路图像、action、state、frame_index 和 timestamp 时间轴齐全，
+  时间轴有序，文件大小 342739164 字节。
+- 当前实测软件版本见 [verified_environment.json](verified_environment.json)。本次未连接实物设备，
+  未重新验证 v2.1 双向转换，也未操作 Rerun 桌面 GUI。
+
+以下为历史验证记录；其旧依赖版本及当时缺少依赖的描述不代表上面的当前环境。
+
+## 2026-10-15：8D state + 7D action + Conda 手动安装版本
 
 更新时间：2026-10-15。本版本已修改 `observation.state` 为 8D，保留 `action` 为 7D，新增夹爪状态反馈适配接口，删除 `tools/setup_env.sh` 并在 README 中提供手动 Conda 命令。
 
@@ -9,7 +30,7 @@
 - 原有 `test_dataset_integration.py` 与 `test_lerobot_bridge.py` 需要在 README 创建的 Conda v3 环境（安装 draccus、av、官方 LeRobot 源码及其依赖）中运行。当前执行环境缺少 `draccus`，**尚未**完成本轮官方 v3 writer/reader、v2.1↔v3.0 的完整回归测试。
 - 本轮**未验证**两组 Conda 环境全新安装、物理夹爪反馈驱动、UR5/RealSense/SpaceMouse 实机采集或夹爪实体执行。
 
-**历史日志不能视为当前 8D schema 的运行验证。** `docs/reports/` 和 `docs/verified_environment.json` 保留用户原包中上一次测试的历史报告，仅供参考。
+**历史日志不能视为当前 8D schema 的运行验证。** `docs/reports/` 保留用户原包中上一次测试的历史报告，仅供参考；`docs/verified_environment.json` 已在 2026-10-19 更新。
 
 ---
 

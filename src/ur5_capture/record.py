@@ -42,6 +42,20 @@ class TerminalKeys:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.saved)
 
 
+def next_dataset_root(base: str) -> Path:
+    """Return base_0000, base_0001, ... after the highest existing run number."""
+    root = Path(base)
+    prefix = f"{root.name}_"
+    latest = -1
+    if root.parent.exists():
+        for entry in root.parent.iterdir():
+            if entry.name.startswith(prefix):
+                suffix = entry.name[len(prefix):]
+                if suffix.isascii() and suffix.isdigit():
+                    latest = max(latest, int(suffix))
+    return root.with_name(f"{root.name}_{latest + 1:04d}")
+
+
 def record(cfg, unattended=False):
     from .lerobot_bridge import UR5Robot, UR5RobotConfig, SpaceMouseTeleoperator, SpaceMouseTeleoperatorConfig
     if cfg.mode == "real":
@@ -53,8 +67,10 @@ def record(cfg, unattended=False):
             raise ValueError("Live recording requires robot.motion_enabled=true; use devices for diagnostics")
         if any(not c.serial.isdigit() for c in cfg.cameras):
             raise ValueError("Replace all camera serial placeholders before live recording")
-    if Path(cfg.dataset.root).exists():
-        raise FileExistsError(f"Output already exists: {cfg.dataset.root}")
+    # Keep the configured base reusable, including repeated calls with the same cfg.
+    cfg = cfg.model_copy(deep=True)
+    cfg.dataset.root = str(next_dataset_root(cfg.dataset.root))
+    print(f"Dataset output: {cfg.dataset.root}")
     rig = CameraRig(cfg)
     robot = UR5Robot(UR5RobotConfig(id="ur5"), capture_config=cfg)
     mouse = SpaceMouseTeleoperator(SpaceMouseTeleoperatorConfig(id="spacemouse"), capture_config=cfg)
