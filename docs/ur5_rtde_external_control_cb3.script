@@ -1,0 +1,17 @@
+# UR5 CB3 / PolyScope 3.15 helper program for ur_rtde.
+#
+# This file is a minimal pendant-side program template. It does not replace
+# the official External Control URCap. Install that URCap when available, then
+# set its host to the capture PC and its port to 50005.
+#
+# Keep this file as a Script node before the External Control node if RG2
+# register worker support is required. Do not run it as a second motion program.
+
+global RTDE_EXTERNAL_CONTROL_PORT = 50005
+
+# Optional RG2 worker. Include rg2_worker_template.script contents here before
+# the External Control node in PolyScope. The worker must use a separate thread
+# and must not call move/servo commands.
+
+textmsg("UR5 RTDE External Control helper loaded; port ", RTDE_EXTERNAL_CONTROL_PORT)
+sync()

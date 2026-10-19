@@ -2,21 +2,21 @@
 
 `observation.state` 为 `[x,y,z,rx,ry,rz,left_finger_qpos_m,right_finger_qpos_m]`。
 前六维是 UR RTDE 的绝对 TCP 位姿，姿态使用旋转向量 rad。
-最后两维来自独立夹爪测量，单位米，不能从动作标签推断。
+最后两维来自夹爪反馈，单位米，不能从动作标签推断。RTDE RG2 旧式工具 I/O 链路只回报 worker 接受的目标开度，不提供独立编码器测量。
 
 `action` 保持 7D `[dx,dy,dz,drx,dry,drz,grasp]`，`grasp=0` 为目标张开，
 `grasp=1` 为目标闭合。它是请求目标，不代表已经到位或检测到物体。
-物理执行还要求 `actuation_enabled: true` 和当前 deadman 为真。
+物理执行还要求 `actuation_enabled: true`。SpaceMouse 按键 0 或终端 `g` 切换夹爪目标；按键不需要持续按住。
 
 ## 内置 RG2 驱动
 
-配置 `feedback_plugin: "ur5_capture.rg2:RG2Gripper"`，并提供 Compute Box 的连接参数。
+配置 `feedback_plugin: "ur5_capture.rg2:RTDEGripper"`，并提供 UR5 控制器的 RTDE 参数。
 最大原始开度 110 mm；开闭目标和 3–40 N 夹持力均可配置。
 完整连接要求、寄存器和参数见 [RG2.md](RG2.md)。
 
-RG2 根据**实测原始总开度** `w` 生成等效坐标 `[w/2,-w/2]`。
+RTDE RG2 根据 **worker 回报的原始总开度** `w` 生成等效坐标 `[w/2,-w/2]`。
 110 mm 对应 `[0.055,-0.055]` m；夹持到 30 mm 物体时对应 `[0.015,-0.015]` m，
-即使当前命令要求闭到 0 mm，也不会把测量伪造成 `[0,0]`。
+即使当前命令要求闭到 0 mm，也不能把它解释为独立传感器测得的 `[0,0]`。
 这两个坐标不是独立编码器值或 RG2 连杆的实际转角。
 
 ## 自定义插件协议
@@ -56,14 +56,14 @@ gripper:
 插件应保留最新目标，在夹爪忙碌时延后发送，不能默默丢弃。
 `stop()` 应取消未执行目标并停止运动，不自动张开夹爪。
 
-主循环与 LeRobot `send_action()` 均显式传递 deadman；松开后调用 `stop()`。
+主循环与 LeRobot `send_action()` 均显式传递 `enabled`；采集期间由 SpaceMouse 样本启用运动，episode 结束时调用 `stop()`。
 直接调用适配器 `update_command()` 时默认 `enabled=False`，不会隐式执行。
 episode 结束、异常和退出时也清理执行驱动。
 只读模式不调用执行方法；mock 模式仍只模拟反馈。
 
 ## 测量语义和时间
 
-`read_qpos()` 必须返回恰好两个有限值。若只有总开度测量，可在确认对称与符号后派生
+`read_qpos()` 必须返回恰好两个有限值。若只有总开度或 worker 状态，可在确认对称与符号后派生
 `[w/2,-w/2]`，并在文档中标明来源。不能声称独立测量了两根手指。
 
 后台缓存插件可提供 `sample_host_time` 属性，返回最近一次 `read_qpos()` 对应的硬件读取
