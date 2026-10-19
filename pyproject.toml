@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 replay = ["rerun-sdk==0.33.1"]
+preview = ["opencv-python>=4.10,<5"]
 hardware = ["ur-rtde>=1.6,<2", "pyspacemouse==2.0.0", "pyrealsense2>=2.55,<2.57; sys_platform == 'linux'"]
 test = ["pytest>=8,<9", "ruff>=0.9"]
 
@@ -24,6 +25,7 @@ test = ["pytest>=8,<9", "ruff>=0.9"]
 ur5-capture = "ur5_capture.cli:main"
 ur5-convert = "ur5_capture.convert:main"
 ur5-replay = "ur5_capture.replay:main"
+ur5-preview = "ur5_capture.preview:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

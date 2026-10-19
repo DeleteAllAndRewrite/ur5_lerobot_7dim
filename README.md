@@ -145,6 +145,24 @@ ur5-capture devices
 
 RealSense 还需要匹配的系统 SDK/USB 设备权限；SpaceMouse 使用 PySpaceMouse 2.0 的原始 HID 接口，需要 hidapi 系统库及 hidraw 访问权限。依照设备官方安装说明配置，避免其他 SpaceMouse 驱动独占设备。
 
+**实时预览三个相机：**
+
+```bash
+# requirements/common.txt 默认安装 headless 版；窗口预览需切换为桌面版 OpenCV
+python -m pip uninstall -y opencv-python-headless
+python -m pip install -e '.[preview,hardware]'
+python -m pip install --force-reinstall --no-deps 'opencv-python>=4.10,<5'
+python -m ur5_capture.preview --config configs/ur5_three_rgb.yaml
+# 无相机时测试窗口
+python -m ur5_capture.preview --mock
+```
+
+也可以使用 `ur5-preview` 命令。三路 RGB 画面按配置顺序并排显示，标注名称、序列号、
+分辨率和帧龄；过期帧显示红色 `STALE`。预览独立读取每路最新帧，不强制三路同步。
+按 `Q`、`Esc`、关闭窗口或 `Ctrl+C` 退出。`--tile-width 640` 调整每路显示宽度，
+`--duration 10` 限时运行；无桌面时可用 `--headless --duration 5` 检查采集与渲染链路。
+脚本只连接相机，不连接机械臂、夹爪或 SpaceMouse，也不保存数据。预览前请退出其他占用相机的采集程序。
+
 若出现 `undefined symbol: hid_enumerate` 或 `HID API is probably not installed`，先安装上述 `libhidapi-hidraw0`，再重试。可在采集环境运行 `python -c 'from ctypes.util import find_library; print(find_library("hidapi-hidraw"))'`，应返回 `libhidapi-hidraw.so.0`。若能列出设备但无法打开，再检查 hidraw 的 udev 权限。
 
 编辑 `configs/ur5_three_rgb.yaml`：
