@@ -42,6 +42,25 @@ class TerminalKeys:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.saved)
 
 
+def prompt(text, display=None):
+    """input() that also accepts keys typed in the preview window."""
+    if display is None or sys.platform == "win32" or not sys.stdin.isatty():
+        return input(text)
+    display.clear_keys()
+    print(text, end="", flush=True)
+    while True:
+        if select.select([sys.stdin], [], [], 0.05)[0]:
+            line = sys.stdin.readline()
+            if not line:
+                raise EOFError
+            return line.rstrip("\n")
+        key = display.read_key()
+        if key:
+            # Window keys answer immediately: Enter = default, q/s/d = choice.
+            print("" if key == "\n" else key, flush=True)
+            return "" if key == "\n" else key
+
+
 def next_dataset_root(base: str) -> Path:
     """Return base_0000, base_0001, ... after the highest existing run number."""
     root = Path(base)
@@ -56,7 +75,7 @@ def next_dataset_root(base: str) -> Path:
     return root.with_name(f"{root.name}_{latest + 1:04d}")
 
 
-def record(cfg, unattended=False):
+def record(cfg, unattended=False, *, preview=False, preview_tile_width=480):
     from .lerobot_bridge import UR5Robot, UR5RobotConfig, SpaceMouseTeleoperator, SpaceMouseTeleoperatorConfig
     if cfg.mode == "real":
         if not cfg.gripper.feedback_plugin:
@@ -75,22 +94,40 @@ def record(cfg, unattended=False):
     robot = UR5Robot(UR5RobotConfig(id="ur5"), capture_config=cfg)
     mouse = SpaceMouseTeleoperator(SpaceMouseTeleoperatorConfig(id="spacemouse"), capture_config=cfg)
     writer = None
+    display = None
     kept = attempted = 0
+    stage = "preview startup"
     try:
+        if preview:
+            from .preview import RecordingPreview
+            display = RecordingPreview(cfg, tile_width=preview_tile_width)
+            display.start()
+        stage = "camera connection"
+        print("Connecting cameras...", flush=True)
         rig.connect()
+        if display is not None:
+            display.watch_idle(rig)
+        stage = "SpaceMouse connection"
+        print("Connecting SpaceMouse...", flush=True)
         mouse.connect()
+        stage = "UR5 / RG2 connection"
+        print(f"Connecting UR5 / RG2 at {cfg.robot.ip} "
+              f"(External Control port {cfg.robot.ur_cap_port})...", flush=True)
         robot.connect()
         state = robot.get_state(cfg.synchronization.max_robot_age_s)
         check_target(state.pose, state.pose, cfg.robot)
+        stage = "dataset initialization"
         writer = V3Writer(cfg, rig.metadata())
         while kept < cfg.dataset.episodes:
+            stage = "waiting for episode"
             if not unattended:
-                if input(f"Episode {kept + 1}: Enter starts; q quits > ").strip().lower() == "q":
+                if prompt(f"Episode {kept + 1}: Enter starts; q quits > ", display).strip().lower() == "q":
                     break
                 print("Move SpaceMouse cap to move. Button 0 or g: toggle gripper; button 1: speed low/high.")
-                print("Terminal: s ends episode, d discards, q discards and quits. Use pendant E-stop for emergency stop.")
+                print("Terminal or camera window: s ends episode, d discards, q discards and quits. Use pendant E-stop for emergency stop.")
             attempted += 1
             decision = "s"
+            timed_out = False
             deadline = time.monotonic()
             frames = round(cfg.dataset.episode_seconds * cfg.dataset.fps)
             # RealSense may spend several frames finishing USB/codec startup even
@@ -98,9 +135,15 @@ def record(cfg, unattended=False):
             # this bounded warm-up, so startup latency cannot discard an episode.
             warmup_frames = min(frames - 1, max(5, cfg.dataset.fps // 2))
             try:
+                stage = "episode capture"
+                if display is not None:
+                    display.update()
+                mouse.start_episode()
+                if display is not None:
+                    display.clear_keys()
                 with TerminalKeys() as keys:
                     for index in range(frames):
-                        key = keys.read()
+                        key = keys.read() or (display.read_key() if display is not None else "")
                         if key == "g":
                             mouse.toggle_grasp()
                         if key in ("s", "d", "q"):
@@ -123,6 +166,8 @@ def record(cfg, unattended=False):
                         frame = build_frame(cfg, state, images, target, delta, sample.grasp, sample.enabled,
                                             response["accepted_host_time"], gripper_sample)
                         writer.add(frame)
+                        if display is not None:
+                            display.update(images)
                         if index == warmup_frames - 1:
                             # Discard startup delay from the schedule while keeping
                             # all warm-up frames in the recorded episode.
@@ -135,16 +180,21 @@ def record(cfg, unattended=False):
                                 # sub-period overruns accumulate into a false miss.
                                 deadline = now
                         time.sleep(max(0, deadline - time.monotonic()))
+                    else:
+                        timed_out = True
             finally:
                 # Stop before episode encoding or any blocking input prompt.
                 robot.stop()
-            if decision == "s" and writer.count >= 2:
+                if display is not None:
+                    display.update(recording=False)
+            if timed_out and writer.count >= 2:
                 print(f"Episode time limit reached ({cfg.dataset.episode_seconds:g}s).")
             if writer.count < 2:
                 decision = "d" if decision != "q" else "q"
             if decision == "s" and not unattended:
-                decision = input("Keep episode? Enter/s=save, d=discard, q=discard and quit > ").strip().lower() or "s"
+                decision = prompt("Keep episode? Enter/s=save, d=discard, q=discard and quit > ", display).strip().lower() or "s"
             if decision == "s":
+                stage = "episode saving"
                 writer.save()
                 kept += 1
                 print(f"Saved episode {kept}/{cfg.dataset.episodes}")
@@ -155,9 +205,10 @@ def record(cfg, unattended=False):
                 break
         return {"saved_episodes": kept, "attempted_episodes": attempted, "root": cfg.dataset.root}
     except BaseException as exc:
+        print(f"Capture failed during {stage}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
         if writer is not None:
             log = {"error": f"{type(exc).__name__}: {exc}", "saved_episodes": kept,
-                   "partial_episode_discarded": True, "monotonic_time": time.monotonic()}
+                   "stage": stage, "partial_episode_discarded": True, "monotonic_time": time.monotonic()}
             (writer.root / "meta" / "capture_failure.json").write_text(json.dumps(log, indent=2), encoding="utf-8")
         raise
     finally:
@@ -167,5 +218,7 @@ def record(cfg, unattended=False):
         with contextlib.suppress(Exception):
             mouse.disconnect()
         rig.disconnect()
+        if display is not None:
+            display.close()
         if writer is not None:
             writer.close()

@@ -24,6 +24,7 @@ class SpaceMouseInput:
         self.device = None
         self.last_event = None
         self.last_event_host = 0.0
+        self.awaiting_fresh_input = False
         self.step = 0
 
     def connect(self):
@@ -38,33 +39,40 @@ class SpaceMouseInput:
         self.grasp = 1 - self.grasp
         return self.grasp
 
-    def read(self):
+    def start_episode(self):
+        """Discard input from waiting/encoding; require a new HID event to move."""
         if self.mock:
-            self.step += 1
-            # Simulate changing commanded grasp, so dataset tests exercise both states.
-            if self.step % 10 == 0:
+            return
+        # Synchronize held buttons without executing clicks made while paused.
+        # Do not reset the cached report's age and then replay its nonzero axes.
+        state = self._drain_state(apply_edges=False)
+        self.last_event = state.t
+        self.last_event_host = time.monotonic()
+        self.awaiting_fresh_input = True
+
+    def _buttons(self, state, *, apply_edges):
+        if self.gripper_button is not None:
+            if self.gripper_button >= len(state.buttons):
+                raise ValueError("Configured gripper button is unavailable on this SpaceMouse")
+            down = bool(state.buttons[self.gripper_button])
+            if apply_edges and down and not self.gripper_button_was_down:
                 self.toggle_grasp()
-            return MouseSample(np.array([0.4 * np.sin(self.step / 30), 0, 0, 0, 0, 0.15]),
-                               True, self.grasp, self.high_speed)
-        # Each read consumes one HID report; drain queued reports before using the axes.
-        # Snapshot t before the next read because the driver mutates a shared state object.
+            self.gripper_button_was_down = down
+        if self.cfg.speed_toggle_button >= len(state.buttons):
+            raise ValueError("Configured speed button is unavailable on this SpaceMouse")
+        speed_down = bool(state.buttons[self.cfg.speed_toggle_button])
+        if apply_edges and speed_down and not self.speed_button_was_down:
+            self.high_speed = not self.high_speed
+        self.speed_button_was_down = speed_down
+
+    def _drain_state(self, *, apply_edges=True):
+        # The driver mutates and returns the SAME state object. Snapshot its
+        # timestamp before every read so only genuinely new reports are drained.
         state = self.device.read()
         for _ in range(128):
             if state is None:
                 break
-            if self.gripper_button is not None:
-                if self.gripper_button >= len(state.buttons):
-                    raise ValueError("Configured gripper button is unavailable on this SpaceMouse")
-                down = bool(state.buttons[self.gripper_button])
-                if down and not self.gripper_button_was_down:
-                    self.toggle_grasp()
-                self.gripper_button_was_down = down
-            if self.cfg.speed_toggle_button >= len(state.buttons):
-                raise ValueError("Configured speed button is unavailable on this SpaceMouse")
-            speed_down = bool(state.buttons[self.cfg.speed_toggle_button])
-            if speed_down and not self.speed_button_was_down:
-                self.high_speed = not self.high_speed
-            self.speed_button_was_down = speed_down
+            self._buttons(state, apply_edges=apply_edges)
             previous_t = state.t
             state = self.device.read()
             if state is None or state.t == previous_t:
@@ -73,8 +81,23 @@ class SpaceMouseInput:
             raise RuntimeError("SpaceMouse input queue did not drain")
         if state is None:
             raise RuntimeError("SpaceMouse returned no state")
+        return state
+
+    def read(self):
+        if self.mock:
+            self.step += 1
+            # Simulate changing commanded grasp, so dataset tests exercise both states.
+            if self.step % 10 == 0:
+                self.toggle_grasp()
+            return MouseSample(np.array([0.4 * np.sin(self.step / 30), 0, 0, 0, 0, 0.15]),
+                               True, self.grasp, self.high_speed)
+        state = self._drain_state()
         now = time.monotonic()
         event_time = state.t
+        if self.awaiting_fresh_input:
+            if event_time == self.last_event:
+                return MouseSample(np.zeros(6), False, self.grasp, self.high_speed)
+            self.awaiting_fresh_input = False
         if event_time != self.last_event:
             self.last_event, self.last_event_host = event_time, now
         axes = np.array([state.x, state.y, state.z, state.roll, state.pitch, state.yaw], dtype=float)

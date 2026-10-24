@@ -1,5 +1,47 @@
 # 视频、action 和 state 同步回放
 
+## 多条 episode 回放
+
+在项目目录激活 `ur5-lerobot-v3` 环境后，可直接查看合并数据集：
+
+```bash
+# 同一个 Rerun 窗口加载所有 episode，每条作为独立 recording，可在左侧切换
+ur5-replay --root dataset/ur5_three_rgb_merged --repo-id local/ur5_three_rgb_merged \
+  --episodes all --episode-mode separate
+
+# 将所有 episode 串成同一条连续时间轴
+ur5-replay --root dataset/ur5_three_rgb_merged --repo-id local/ur5_three_rgb_merged \
+  --episodes all --episode-mode continuous
+
+# 也可以只选几条，支持逗号分隔及闭区间；按所写顺序播放，重复编号自动去重
+ur5-replay --root dataset/ur5_three_rgb_merged --repo-id local/ur5_three_rgb_merged \
+  --episodes 0,2,5-8 --episode-mode continuous
+```
+
+`separate` 是默认模式，每条 recording 的时间从 0 开始。
+`continuous` 将后一条的起点设为前一条终点加一个帧周期；全局 `frame_index` 连续递增，
+`Episode` 曲线及 `episode_index` 时间轴标识原始 episode 编号。
+这是用于浏览的拼接时间，不包含两次采集之间的等待时间；源数据时间戳保持不变。
+旧的 `--episode-index 0` 命令仍保持原行为，且不能与 `--episodes` 同时使用。
+
+两种模式都支持 `--save --output-dir replays`。独立模式每条写一个 `.rrd`，
+连续模式写一个 `*_continuous_<首编号>_<末编号>.rrd`。相同命名的导出会覆盖原文件，
+需要保留不同选择结果时应指定不同 `--output-dir`。
+可用一个 Rerun 窗口打开多个已导出的 recording：
+
+```bash
+rerun replays/ur5_three_rgb_merged/*.rrd
+```
+
+首次加载需要逐帧解码，`all` 会处理全部选中轨迹。
+建议先用 `--episodes 0-2` 查看。`--server-memory-limit 4GiB` 控制新模式的服务历史缓存；
+超出缓存时，后连接的查看器可能看不到较早的数据。完整留存优先用 `--save` 导出。
+
+新模式也兼容 `--mode distant`。连续模式沿用指定的一个 gRPC/Web 端口；
+独立模式为第 n 条 recording 使用 `--grpc-port + n`、`--web-port + n`（n 从 0 开始），
+终端会打印各条连接地址。浏览器分别打开对应 Web 端口；桌面 Rerun 可同时打开多个
+打印出的 `rerun+http://.../proxy` 地址，在同一窗口切换。服务按 `Ctrl+C` 退出。
+
 本项目通过 `ur5-replay` 调用官方 LeRobot 的 Rerun 可视化接口，在同一时间轴显示三路 RGB、
 7 维 action 和 8 维 state。支持播放、暂停和拖动时间轴，回放期间无需连接机械臂、相机或 SpaceMouse。
 

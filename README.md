@@ -211,6 +211,23 @@ ur5-capture validate --config configs/ur5_three_rgb.yaml
 ur5-capture record --config configs/ur5_three_rgb.yaml
 ```
 
+**采集 Episode 时同时查看三路图像：**
+
+```bash
+ur5-capture record --config configs/ur5_three_rgb.yaml --preview
+# 可选：调整每路预览宽度，默认 480 像素
+ur5-capture record --config configs/ur5_three_rgb.yaml --preview --preview-tile-width 640
+```
+
+需要前面相机预览步骤中的桌面版 OpenCV 和桌面显示环境。采集时无需另外运行
+`ur5-preview`；窗口复用实际写入 Episode 的三路同步 RGB 帧，显示名称、序列号和帧龄。
+显示由独立进程处理，最多刷新 15 次/秒；预览来不及时跳过显示帧，数据仍按配置帧率采集，
+保存的原始图像不会被缩放或添加文字。相机连接后，即使机械臂仍在连接、等待开始或编码保存，
+也会显示相机最新图像，此时标记为 `PAUSED`，表示尚未录制；只有录制期间显示 `RECORDING`。
+窗口内 `Q`、`Esc` 或关闭窗口仅关闭预览，采集继续；
+开始、夹爪切换、结束、丢弃、退出等操作仍使用采集终端和 SpaceMouse。
+不带 `--preview` 时保持原来的无窗口采集方式。
+
 交互方式：
 
 1. Enter 开始 episode；无需按 SpaceMouse 按键 0。
@@ -218,6 +235,10 @@ ur5-capture record --config configs/ur5_three_rgb.yaml
 3. 按键 1 按下沿切换低速/高速档。低速档默认 `0.05 m/s、0.3 rad/s`，高速档默认 `0.15 m/s、0.8 rad/s`。
 4. 终端 `s` 提前结束 episode；`d` 丢弃；`q` 丢弃当前 episode 并退出。结束后 Enter/`s` 保存，`d` 重录，`q` 丢弃并退出。
 5. Ctrl-C 中断采集；当前未完成 episode 丢弃，已经完成的保留。紧急情况使用示教器实体急停。
+
+每个 episode 开始时丢弃保存、等待期间积累的 SpaceMouse 输入和按键事件，保留夹爪目标及速度档。
+开始后先松开摇杆再重新操作；收到新的 HID 事件前不发送运动。录制中非零输入超过
+`teleop.stale_timeout_s` 未更新仍会停止并报错，以防持续重放旧运动指令。
 
 按键 0 和 1 都是按下沿触发，按住不会重复切换。夹爪执行还要求 `gripper.actuation_enabled: true`；关闭时只记录目标，不驱动物理夹爪。结束 episode、异常或退出时会停止软件伺服并取消尚未发送的夹爪目标，不自动张开放开物体。RTDE worker 没有独立停止寄存器，已发送的 RG2 命令由 worker 完成。**8D 状态不能当作独立编码器测量。**
 

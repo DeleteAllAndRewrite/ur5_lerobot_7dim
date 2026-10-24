@@ -12,8 +12,14 @@ def main():
         command.add_argument("--config", default="configs/ur5_three_rgb.yaml")
         if name == "record":
             command.add_argument("--unattended", action="store_true", help="Mock mode only")
+            command.add_argument("--preview", action="store_true",
+                                 help="Show the recorded camera frames in a separate window")
+            command.add_argument("--preview-tile-width", type=int, default=480,
+                                 help="Preview width per camera in pixels (default: 480)")
     sub.add_parser("devices")
     args = parser.parse_args()
+    if args.command == "record" and args.preview_tile_width < 160:
+        parser.error("--preview-tile-width must be at least 160")
     if args.command == "devices":
         import pyrealsense2 as rs
         import pyspacemouse
@@ -34,7 +40,8 @@ def main():
     else:
         from .record import record
         try:
-            print(json.dumps(record(cfg, args.unattended), indent=2))
+            print(json.dumps(record(cfg, args.unattended, preview=args.preview,
+                                    preview_tile_width=args.preview_tile_width), indent=2))
         except KeyboardInterrupt:
             print("Interrupted. Current episode discarded; completed episodes retained.")
             raise SystemExit(130)

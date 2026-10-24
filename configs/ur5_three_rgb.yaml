@@ -2,7 +2,7 @@
 mode: real
 dataset:
   repo_id: local/ur5_three_rgb
-  root: datasets/ur5_three_rgb
+  root: dataset/ur5_three_rgb
   fps: 30
   task: Pick up the object and place it in the target area
   episodes: 100
@@ -45,7 +45,7 @@ teleop:
   speed_toggle_button: 1     # press edge toggles low/high speed
   # spacemouse满偏 -> eef速度 = 比例 × (0.4 m/s, 1.0 rad/s)
   # 取值范围：0 < low_speed_ratio <= high_speed_ratio <= 2
-  low_speed_ratio: 0.75     # 低速档：0.30 m/s, 0.75 rad/s
+  low_speed_ratio: 1.5     # 低速档：0.30 m/s, 0.75 rad/s
   high_speed_ratio: 2.00     # 高速档：0.40 m/s, 1.00 rad/s；设为 2 时为 0.80 m/s, 2.00 rad/s
   stale_timeout_s: 0.15
 gripper:

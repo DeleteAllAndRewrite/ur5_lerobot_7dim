@@ -70,7 +70,17 @@ def main():
     parser.add_argument("--python-v3", required=True, help="Python executable of the LeRobot v0.4.4 environment")
     parser.add_argument("--repo-id", default="local/converted")
     parser.add_argument("--work-parent", help="Temporary storage parent; decoded RGB requires much more disk space")
+    parser.add_argument("--direct-v3-to-v21", action="store_true",
+                        help="Split Arrow/video directly using lossless H264; avoids a full NPZ bridge")
+    parser.add_argument("--resume-staging", help="Resume an interrupted direct conversion staging directory")
     args = parser.parse_args()
+    if args.resume_staging and not args.direct_v3_to_v21:
+        parser.error("--resume-staging requires --direct-v3-to-v21")
+    if args.direct_v3_to_v21:
+        from .convert_v3_direct import convert_direct
+        print(json.dumps(convert_direct(args.source, args.destination, args.python_v21, args.repo_id,
+                                        args.resume_staging), indent=2))
+        return
     print(json.dumps(convert(args.source, args.destination, args.python_v21, args.python_v3,
                              args.repo_id, args.work_parent), indent=2))
 
