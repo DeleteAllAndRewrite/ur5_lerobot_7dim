@@ -49,6 +49,7 @@ flowchart TD
 | `src/ur5_capture/convert.py` | 两个 Python 环境之间的双向转换调度 |
 | `src/ur5_capture/conversion_worker.py` | 官方读写器转换及逐帧校验 |
 | `tools/inspect_dataset.py` | 解码全部视频并检查动作定义和时间连续性 |
+| `tools/trim_static_v21.py` | v2.1 数据清洗：删除开头静止段和长停顿，parquet 与三路视频同步删帧 |
 | `docs/ARCHITECTURE.md` | 数据语义、时序和扩展边界 |
 | `docs/VALIDATION.md` | 已执行验证、结果与实机待验项 |
 | `docs/GRIPPER_FEEDBACK.md` | 真实夹爪关节位置采集接口和示例 |
@@ -310,7 +311,40 @@ ur5-convert \
 
 临时解码 RGB 数据可能远大于 MP4；可用 `--work-parent /path/with/free/space` 指定临时目录。转换失败留下带 `CONVERSION_FAILED.txt` 的临时输出用于检查，不会伪装成完成的数据集。
 
-## 6. 官方参考
+## 6. v2.1 数据清洗：删除静止帧
+
+`tools/trim_static_v21.py` 删除每个 episode 开头连续不动的帧，以及之后所有持续不少于 `--min-pause` 秒的停顿（含结尾静止段）。同一批帧会从 parquet（action、observation.state、complementary_info 等全部列）和每路相机视频中同时删除，所有模态保持对齐。在 v2.1 环境中执行：
+
+```bash
+conda activate ur5-lerobot-v21
+
+# 预览：打印每条 episode 将删除的帧数，不写任何文件
+python tools/trim_static_v21.py --root dataset/ur5_three_rgb_merged_v21
+
+# 写入新数据集，源目录不修改
+python tools/trim_static_v21.py \
+  --root dataset/ur5_three_rgb_merged_v21 \
+  --output dataset/ur5_three_rgb_merged_v21_trimmed \
+  --min-pause 1.0 \
+  --keep 0
+```
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| `--root` | 必填 | 源 v2.1 数据集，从不修改 |
+| `--output` | 无 | 新数据集目录；省略时只做预览 |
+| `--min-pause` | `1.0` | 开始运动后，持续不少于该秒数的停顿才删除；开头静止段总是删除 |
+| `--keep` | `0` | 每段删除区间与运动相邻处保留的静止帧数 |
+| `--finger-tol` | 关闭 | 开头判定时将手指开度变化（m）也视为运动；默认关闭，以便剪掉启动时夹爪自动张开的静止段 |
+| `--workers` | `3` | 并行视频编码数 |
+
+判定规则：开头段一直删到第一帧出现手臂 action 非零、grasp 指令变化，或 TCP 相对第 0 帧移动超过 0.5 mm / 0.003 rad。之后的停顿要求逐帧手臂 action 为零、grasp 指令不变、TCP 帧间移动 ≤ 0.1 mm / 0.001 rad、手指 ≤ 1e-6 m；同一段累计漂移超过 0.5 mm / 0.003 rad 即切断，慢速运动不会被当作停顿。夹爪开合时手指在动，不会被删除。
+
+视频以 H264 CRF 0 无损重编码，输出逐帧解码计数；`timestamp`、`frame_index`、`index` 重新编号，`complementary_info` 中的原始硬件时间保持不变；每条 episode 的统计量重新计算。先写入 `<output>.partial`，用官方 `LeRobotDataset` 读取校验每条 episode 首尾帧后才改名为正式目录。每条 episode 删除的源帧区间记录在 `meta/static_trim.json`。脚本写入前会检查磁盘空间，输出大小约为源数据集按剩余帧比例折算。
+
+`tools/filter_static_v21.py` 是另一种方案：把停顿压短（保留每段首尾各 3 帧、夹爪开合前后 1 秒不动），并在校验后原地替换源数据集、保留备份。
+
+## 7. 官方参考
 
 - [LeRobotDataset v3 文档](https://huggingface.co/docs/lerobot/lerobot-dataset-v3)
 - [当前 LeRobot 固定源码](https://github.com/huggingface/lerobot/tree/326484d77d2ac90379e84222dfad21fe4acf1f71)
